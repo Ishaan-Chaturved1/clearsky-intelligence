@@ -1,0 +1,217 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  ClearSky Intelligence - Serverless Environmental Intelligence Architecture
+  Quantified Minds (Ishaan Chaturvedi, Ankit Kumar Tiwari)
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [development, staging, production]
+    Description: Deployment stage environment
+
+  OpenAQApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: OpenAQ API v3 License Key (Optional for demo mode)
+
+  NasaFirmsMapKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: NASA FIRMS Map Key for VIIRS active thermal anomalies
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: python3.11
+    Tracing: Active
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        STORAGE_BACKEND: dynamodb
+        DYNAMODB_ZONES_TABLE: !Ref ZonesTable
+        DYNAMODB_READINGS_TABLE: !Ref ReadingsTable
+        DYNAMODB_DECISIONS_TABLE: !Ref DecisionsTable
+        DYNAMODB_ALERTS_TABLE: !Ref AlertsTable
+        OPENAQ_API_KEY: !Ref OpenAQApiKey
+        NASA_FIRMS_MAP_KEY: !Ref NasaFirmsMapKey
+        SNS_ALERT_TOPIC_ARN: !Ref AlertsTopic
+
+Resources:
+  # ==========================================
+  # 1. DYNAMODB TABLES
+  # ==========================================
+  ZonesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "clearsky-zones-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: zone_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: zone_id
+          KeyType: HASH
+
+  ReadingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "clearsky-readings-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: zone_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: zone_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  DecisionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "clearsky-decisions-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: zone_id
+          AttributeType: S
+        - AttributeName: scored_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: zone_id
+          KeyType: HASH
+        - AttributeName: scored_at
+          KeyType: RANGE
+
+  AlertsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "clearsky-alerts-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: alert_type
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: alert_type
+          KeyType: HASH
+        - AttributeName: created_at
+          KeyType: RANGE
+
+  # ==========================================
+  # 2. SNS NOTIFICATIONS TOPIC
+  # ==========================================
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "clearsky-high-priority-alerts-${Environment}"
+
+  # ==========================================
+  # 3. HTTP API GATEWAY
+  # ==========================================
+  ClearSkyHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowHeaders:
+          - "*"
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        MaxAge: 600
+
+  # ==========================================
+  # 4. API FASTAPI LAMBDA
+  # ==========================================
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: lambda_handler.handler
+      Events:
+        ApiProxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ClearSkyHttpApi
+            Path: /api/{proxy+}
+            Method: ANY
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ZonesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReadingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DecisionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsTable
+
+  # ==========================================
+  # 5. SCHEDULED INGESTION & SCORING LAMBDA
+  # ==========================================
+  IngestionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: lambda_handler.ingestion_handler
+      Timeout: 120
+      MemorySize: 1024
+      Events:
+        ScheduledTrigger:
+          Type: Schedule
+          Properties:
+            Schedule: rate(30 minutes)
+            Name: !Sub "clearsky-ingestion-cron-${Environment}"
+            Description: Triggers environmental data ingestion and zone scoring every 30 minutes
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ZonesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReadingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DecisionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertsTopic.TopicName
+
+  # ==========================================
+  # 6. S3 & CLOUDFRONT FRONTEND HOSTING
+  # ==========================================
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "clearsky-frontend-${Environment}-${AWS::AccountId}"
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+Outputs:
+  HttpApiUrl:
+    Description: HTTP API Gateway endpoint URL
+    Value: !Sub "https://${ClearSkyHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+
+  FrontendBucketName:
+    Description: S3 bucket for hosting compiled Vite frontend
+    Value: !Ref FrontendBucket
+
+  AlertsTopicArn:
+    Description: SNS Topic ARN for priority 4 & 5 alerts
+    Value: !Ref AlertsTopic

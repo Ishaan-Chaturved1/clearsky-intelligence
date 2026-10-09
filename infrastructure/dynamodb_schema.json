@@ -1,0 +1,26 @@
+{
+  "system": "ClearSky Intelligence",
+  "storage_backend": "Amazon DynamoDB",
+  "partition_key_design": {
+    "clearsky-zones": {
+      "partition_key": "zone_id (String)",
+      "attributes": ["name", "latitude", "longitude", "description", "zone_type", "nearby_infrastructure"]
+    },
+    "clearsky-readings": {
+      "partition_key": "zone_id (String)",
+      "sort_key": "timestamp (String, ISO-8601 UTC)",
+      "ttl_attribute": "ttl (Number, Epoch)",
+      "attributes": ["reading_id", "pm25", "pm10", "pm_ratio", "weather", "fire_summary", "data_mode", "is_stale"]
+    },
+    "clearsky-decisions": {
+      "partition_key": "zone_id (String)",
+      "sort_key": "scored_at (String, ISO-8601 UTC)",
+      "attributes": ["decision_id", "decision", "priority", "confidence", "pollutants", "weather", "reasons", "warnings", "source_status", "data_mode", "observed_at"]
+    },
+    "clearsky-alerts": {
+      "partition_key": "alert_type (String)",
+      "sort_key": "created_at (String, ISO-8601 UTC)",
+      "attributes": ["alert_id", "zone_id", "zone_name", "severity", "message", "decision", "priority"]
+    }
+  }
+}

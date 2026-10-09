@@ -1,0 +1,153 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Sentinel & Clarendon font mappings */
+@font-face {
+  font-family: 'Sentinel';
+  font-style: normal;
+  font-weight: 400;
+  src: local('Sentinel'), local('Sentinel-Book'), local('Sentinel Book'), local('Besley-Regular'), local('Besley');
+}
+
+@font-face {
+  font-family: 'Sentinel';
+  font-style: normal;
+  font-weight: 600;
+  src: local('Sentinel-Medium'), local('Sentinel Medium'), local('Besley-SemiBold'), local('Besley');
+}
+
+@font-face {
+  font-family: 'Sentinel';
+  font-style: normal;
+  font-weight: 700;
+  src: local('Sentinel-Bold'), local('Sentinel Bold'), local('Besley-Bold'), local('Besley');
+}
+
+@font-face {
+  font-family: 'Clarendon';
+  font-style: normal;
+  font-weight: 400;
+  src: local('Clarendon'), local('Clarendon URW'), local('Clarendon BT'), local('Besley-Regular'), local('Besley');
+}
+
+@font-face {
+  font-family: 'Clarendon';
+  font-style: normal;
+  font-weight: 600;
+  src: local('Clarendon-Medium'), local('Clarendon Medium'), local('Besley-SemiBold'), local('Besley');
+}
+
+@font-face {
+  font-family: 'Clarendon';
+  font-style: normal;
+  font-weight: 700;
+  src: local('Clarendon-Bold'), local('Clarendon Bold'), local('Besley-Bold'), local('Besley');
+}
+
+@layer base {
+  body {
+    @apply bg-warm-50 text-earth-800 font-clarendon antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-sentinel tracking-tight text-earth-900;
+  }
+
+  ::selection {
+    @apply bg-accent-500 text-white;
+  }
+}
+
+/* Tabular figures for numerical metrics */
+.font-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Warm-toned scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #FFF9EC;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #D4C5B3;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #F06B42;
+}
+
+/* Leaflet warm theme map overrides */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  background: #FFF5E0 !important;
+  font-family: 'Source Serif 4', Georgia, serif !important;
+  border-radius: 1rem;
+}
+
+.leaflet-popup-content-wrapper {
+  background: #FFFDF7 !important;
+  color: #3E3025 !important;
+  border: 1px solid #E8DDD0 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 10px 25px -5px rgba(157,122,78,0.15) !important;
+}
+
+.leaflet-popup-tip {
+  background: #FFFDF7 !important;
+}
+
+/* Custom pulsating marker animations */
+@keyframes pulse-slow {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}
+
+.marker-pulse {
+  animation: pulse-slow 2.5s infinite ease-in-out;
+}
+
+/* Smooth page transitions */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.5s ease-out forwards;
+}
+
+/* Hero gradient animation */
+@keyframes gradient-shift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.animate-gradient {
+  background-size: 200% 200%;
+  animation: gradient-shift 8s ease infinite;
+}

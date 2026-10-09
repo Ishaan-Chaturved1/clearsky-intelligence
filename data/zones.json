@@ -1,0 +1,170 @@
+[
+  {
+    "zone_id": "DEL-AV-01",
+    "name": "Anand Vihar ISBT Corridor",
+    "latitude": 28.6469,
+    "longitude": 77.3160,
+    "description": "High-density inter-state bus transit terminal with ongoing flyover construction and heavy unpaved shoulder dust.",
+    "zone_type": "Transit & Construction Corridor",
+    "nearby_infrastructure": {
+      "major_roads": ["Vikas Marg Extension", "Gazipur Link Road"],
+      "construction_sites": ["ISBT Multimodal Expansion Lot 3 (180m away)"],
+      "has_construction_nearby": true,
+      "construction_distance_meters": 180
+    }
+  },
+  {
+    "zone_id": "DEL-PB-02",
+    "name": "Punjabi Bagh West",
+    "latitude": 28.6742,
+    "longitude": 77.1311,
+    "description": "Arterial junction linking Ring Road and Rohtak Road with elevated metro corridor.",
+    "zone_type": "Traffic Corridor",
+    "nearby_infrastructure": {
+      "major_roads": ["Mahatma Gandhi Ring Road", "Rohtak Road"],
+      "construction_sites": [],
+      "has_construction_nearby": false,
+      "construction_distance_meters": 1200
+    }
+  },
+  {
+    "zone_id": "DEL-RKP-03",
+    "name": "R.K. Puram Sector 8",
+    "latitude": 28.5638,
+    "longitude": 77.1864,
+    "description": "High-density institutional and residential sector bordering Ring Road and green ridge.",
+    "zone_type": "Residential & Institutional",
+    "nearby_infrastructure": {
+      "major_roads": ["Africa Avenue", "Ring Road South"],
+      "construction_sites": [],
+      "has_construction_nearby": false,
+      "construction_distance_meters": 1500
+    }
+  },
+  {
+    "zone_id": "DEL-JH-04",
+    "name": "Jahangirpuri Metro Perimeter",
+    "latitude": 28.7328,
+    "longitude": 77.1706,
+    "description": "Dense urban commercial-residential boundary zone with unpaved logistics access paths.",
+    "zone_type": "Dense Commercial / Logistics",
+    "nearby_infrastructure": {
+      "major_roads": ["Grand Trunk Road", "Outer Ring Road"],
+      "construction_sites": ["Stormwater Canal Embankment Repair (240m away)"],
+      "has_construction_nearby": true,
+      "construction_distance_meters": 240
+    }
+  },
+  {
+    "zone_id": "DEL-WZ-05",
+    "name": "Wazirpur Industrial Area",
+    "latitude": 28.6998,
+    "longitude": 77.1654,
+    "description": "Established industrial cluster with mixed manufacturing, metal finishing units and high heavy vehicle movement.",
+    "zone_type": "Industrial Cluster",
+    "nearby_infrastructure": {
+      "major_roads": ["Ring Road Wazirpur", "Prembari Flyover"],
+      "construction_sites": ["Factory Warehouse Renovation (290m away)"],
+      "has_construction_nearby": true,
+      "construction_distance_meters": 290
+    }
+  },
+  {
+    "zone_id": "DEL-OKH-06",
+    "name": "Okhla Industrial Phase II",
+    "latitude": 28.5308,
+    "longitude": 77.2713,
+    "description": "Commercial and light manufacturing zone near waste-to-energy and logistics depot.",
+    "zone_type": "Industrial & Logistics",
+    "nearby_infrastructure": {
+      "major_roads": ["Maa Anandmayee Marg", "Mathura Road"],
+      "construction_sites": ["Commercial Plaza Foundation Work (210m away)"],
+      "has_construction_nearby": true,
+      "construction_distance_meters": 210
+    }
+  },
+  {
+    "zone_id": "DEL-ROH-07",
+    "name": "Rohini Sector 16",
+    "latitude": 28.7325,
+    "longitude": 77.1199,
+    "description": "Suburban residential and institutional hub with wide secondary avenues and local market pockets.",
+    "zone_type": "Suburban Residential",
+    "nearby_infrastructure": {
+      "major_roads": ["Bhagwan Mahavir Marg", "Dr KN Katju Marg"],
+      "construction_sites": [],
+      "has_construction_nearby": false,
+      "construction_distance_meters": 2200
+    }
+  },
+  {
+    "zone_id": "DEL-DWK-08",
+    "name": "Dwarka Sector 8",
+    "latitude": 28.5710,
+    "longitude": 77.0667,
+    "description": "Sub-city sector bordering airport boundary wall and wide arterial connector roads.",
+    "zone_type": "Planned Residential & Transit",
+    "nearby_infrastructure": {
+      "major_roads": ["Dwarka Expressway Link", "Sector 8 Road"],
+      "construction_sites": [],
+      "has_construction_nearby": false,
+      "construction_distance_meters": 1800
+    }
+  },
+  {
+    "zone_id": "DEL-IGI-09",
+    "name": "IGI Airport Terminal 3 Apron Buffer",
+    "latitude": 28.5562,
+    "longitude": 77.1000,
+    "description": "Aviation logistics gateway with high jet fuel combustion monitoring and open tarmac buffers.",
+    "zone_type": "Aviation & Logistics",
+    "nearby_infrastructure": {
+      "major_roads": ["Northern Access Road", "Airport Expressway"],
+      "construction_sites": [],
+      "has_construction_nearby": false,
+      "construction_distance_meters": 950
+    }
+  },
+  {
+    "zone_id": "DEL-BAW-10",
+    "name": "Bawana Industrial Estate",
+    "latitude": 28.7958,
+    "longitude": 77.0398,
+    "description": "Northwest industrial park with plastic, paint, and packaging units and unpaved interior transit corridors.",
+    "zone_type": "Heavy Industrial",
+    "nearby_infrastructure": {
+      "major_roads": ["Bawana Road", "Western Peripheral Connector"],
+      "construction_sites": ["CETP Pipeline Excavation (160m away)"],
+      "has_construction_nearby": true,
+      "construction_distance_meters": 160
+    }
+  },
+  {
+    "zone_id": "DEL-ITO-11",
+    "name": "ITO Crossing & Vikas Bhawan",
+    "latitude": 28.6315,
+    "longitude": 77.2433,
+    "description": "Dense administrative and traffic core at the junction of Delhi-Noida transit lanes and Ring Road.",
+    "zone_type": "Administrative Core",
+    "nearby_infrastructure": {
+      "major_roads": ["Bahadur Shah Zafar Marg", "IP Marg"],
+      "construction_sites": [],
+      "has_construction_nearby": false,
+      "construction_distance_meters": 850
+    }
+  },
+  {
+    "zone_id": "DEL-LOD-12",
+    "name": "Lodhi Road Institutional Area",
+    "latitude": 28.5914,
+    "longitude": 77.2273,
+    "description": "Central Delhi green corridor with institutional headquarters, urban heritage gardens, and lower baseline road dust.",
+    "zone_type": "Urban Green & Institutional",
+    "nearby_infrastructure": {
+      "major_roads": ["Lodhi Road", "Max Mueller Marg"],
+      "construction_sites": [],
+      "has_construction_nearby": false,
+      "construction_distance_meters": 2400
+    }
+  }
+]
