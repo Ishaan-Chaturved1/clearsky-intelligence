@@ -114,7 +114,7 @@ export const ZoneMap: React.FC<ZoneMapProps> = ({
             }
             url={
               import.meta.env.VITE_CARTO_API_KEY
-                ? `https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?api_key=${import.meta.env.VITE_CARTO_API_KEY}`
+                ? `https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${import.meta.env.VITE_CARTO_API_KEY}`
                 : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             }
           />
