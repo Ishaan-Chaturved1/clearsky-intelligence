@@ -149,3 +149,94 @@ def test_intervention_logging_and_effectiveness(client):
     sum_data = res_sum.json()
     assert sum_data["model_status"] == "EXPERIMENTAL_CALIBRATING"
     assert sum_data["sample_size"] >= 2
+
+def test_geo_search_endpoint(client):
+    res = client.get("/api/geo/search?q=Connaught Place")
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data) >= 1
+    first = data[0]
+    assert "place_name" in first
+    assert "latitude" in first
+    assert "longitude" in first
+    assert abs(first["latitude"] - 28.63) < 0.2
+
+def test_geo_reverse_endpoint(client):
+    res = client.get("/api/geo/reverse?lat=28.6315&lon=77.2167")
+    assert res.status_code == 200
+    data = res.json()
+    assert "place_name" in data
+    assert "latitude" in data
+    assert "longitude" in data
+
+def test_stations_endpoint(client):
+    res = client.get("/api/stations?lat=28.6139&lon=77.2090&radius_km=30")
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data) >= 1
+    first_st = data[0]
+    assert "station_id" in first_st
+    assert "station_name" in first_st
+    assert "distance_km" in first_st
+
+def test_location_analysis_endpoint(client):
+    res = client.get("/api/locations/analyze?lat=28.6315&lon=77.2167&name=Connaught Place")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["location_name"] == "Connaught Place"
+    assert "decision" in data
+    assert "weather" in data
+    assert "pm10" in data
+    assert "pm25" in data
+    assert "confidence" in data
+    assert "pressure_tendency" in data
+    assert data["latitude"] == 28.6315
+
+def test_cpcb_aqi_missing_pollutants(client):
+    from app.api.endpoints import calculate_indian_aqi
+    # When both are None, AQI must be None, not 0 and not 25
+    assert calculate_indian_aqi(None, None) is None
+    # When negative, must be None
+    assert calculate_indian_aqi(-10, -5) is None
+    # Valid PM10 only
+    aqi_pm10 = calculate_indian_aqi(100.0, None)
+    assert aqi_pm10 == 100
+    # Valid PM2.5 only
+    aqi_pm25 = calculate_indian_aqi(None, 60.0)
+    assert aqi_pm25 == 100
+    # Valid combination
+    assert calculate_indian_aqi(150.0, 75.0) is not None
+
+def test_water_quantity_does_not_affect_decision_weighting(client):
+    from app.services.decision_engine import DecisionEngine
+    from app.models.domain import Zone, EnvironmentalReading, PollutantValue, WeatherConditions, NearbyInfrastructure
+    engine = DecisionEngine()
+    zone = Zone(
+        zone_id="TEST-ZONE",
+        name="Test Locality",
+        latitude=28.6,
+        longitude=77.2,
+        description="Test",
+        zone_type="Residential",
+        nearby_infrastructure=NearbyInfrastructure(
+            major_roads=["Main Road"],
+            construction_sites=[],
+            has_construction_nearby=False
+        )
+    )
+    reading = EnvironmentalReading(
+        reading_id="RD-TEST",
+        zone_id="TEST-ZONE",
+        timestamp="2026-10-09T12:00:00Z",
+        pm25=PollutantValue(value=50.0, data_type="observed"),
+        pm10=PollutantValue(value=150.0, data_type="observed"),
+        pm_ratio=3.0,
+        weather=WeatherConditions(temperature_c=25.0, relative_humidity=50.0, wind_speed_kmh=10.0),
+        is_stale=False
+    )
+    decision = engine.evaluate(zone, reading, "2026-10-09T12:00:00Z")
+    assert decision.decision.value == "INTERVENTION_RECOMMENDED"
+    # Decision must NOT have any water quantity fields
+    assert not hasattr(decision, "water_required_liters")
+    assert not hasattr(decision, "cost_inr")
+

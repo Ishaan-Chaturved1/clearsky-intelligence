@@ -418,3 +418,65 @@ export interface InterventionOutcomeRecord {
   status: string;
   notes?: string | null;
 }
+
+export interface GeocodingPlace {
+  place_name: string;
+  display_name: string;
+  latitude: number;
+  longitude: number;
+  type?: string | null;
+  osm_type?: string | null;
+  boundingbox?: string[] | null;
+}
+
+export interface StationObservation {
+  station_id: string;
+  station_name: string;
+  latitude: number;
+  longitude: number;
+  distance_km: number;
+  pm25?: number | null;
+  pm10?: number | null;
+  observed_at?: string | null;
+  provider: string;
+}
+
+export interface LocationAnalysisResponse {
+  location_name: string;
+  display_name: string;
+  latitude: number;
+  longitude: number;
+  timestamp: string;
+  aqi_estimate: number | null;
+  aqi_standard: string;
+  pm10: PollutantValue;
+  pm25: PollutantValue;
+  pm_ratio: number | null;
+  pm_ratio_interpretation: string;
+  weather: WeatherConditions;
+  surface_pressure_hpa?: number | null;
+  pressure_trend_3h_hpa?: number | null;
+  pressure_trend_6h_hpa?: number | null;
+  pressure_tendency: string;
+  pressure_interpretation: string;
+  wind_drift_risk: string;
+  evaporation_rate_mmh?: number | null;
+  estimated_surface_drying_time_min?: number | null;
+  nearest_station?: StationObservation | null;
+  contributing_stations_count: number;
+  spatial_coverage_rating: string;
+  data_freshness_seconds: number;
+  confidence: ConfidenceLevel;
+  data_mode: DataMode;
+  decision: DecisionType;
+  priority?: number | null;
+  reasons: string[];
+  warnings: string[];
+  triggered_rules: string[];
+  conditions_to_change: string[];
+  forecast_windows: ForecastWindow[];
+  candidate_segments: CandidateRoadSegment[];
+  nearby_infrastructure?: NearbyInfrastructure | null;
+  fire_summary?: FireSummary;
+}
+

@@ -15,7 +15,10 @@ import {
   CandidateRoadSegmentsResponse,
   ForecastWindowsResponse,
   StrategyComparisonResponse,
-  InterventionOutcomeRecord
+  InterventionOutcomeRecord,
+  GeocodingPlace,
+  StationObservation,
+  LocationAnalysisResponse
 } from '../types';
 
 const API_BASE = '/api';
@@ -41,6 +44,20 @@ export const api = {
   getOverview: () => fetchJson<SystemOverview>(`${API_BASE}/overview`),
   
   getZones: () => fetchJson<ZoneWithLatest[]>(`${API_BASE}/zones`),
+
+  searchGeo: (query: string, limit = 6) =>
+    fetchJson<GeocodingPlace[]>(`${API_BASE}/geo/search?q=${encodeURIComponent(query)}&limit=${limit}`),
+
+  reverseGeo: (lat: number, lon: number) =>
+    fetchJson<GeocodingPlace>(`${API_BASE}/geo/reverse?lat=${lat}&lon=${lon}`),
+
+  getStations: (lat = 28.6139, lon = 77.2090, radiusKm = 35) =>
+    fetchJson<StationObservation[]>(`${API_BASE}/stations?lat=${lat}&lon=${lon}&radius_km=${radiusKm}`),
+
+  analyzeLocation: (lat: number, lon: number, name?: string) =>
+    fetchJson<LocationAnalysisResponse>(
+      `${API_BASE}/locations/analyze?lat=${lat}&lon=${lon}${name ? `&name=${encodeURIComponent(name)}` : ''}`
+    ),
   
   getZone: (zoneId: string) => fetchJson<ZoneWithLatest>(`${API_BASE}/zones/${zoneId}`),
   

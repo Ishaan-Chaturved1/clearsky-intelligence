@@ -36,6 +36,7 @@ export const DashboardPage: React.FC = () => {
   const [waterData, setWaterData] = useState<WaterSavingsAnalytics | null>(null);
   const [dailyBrief, setDailyBrief] = useState<AiDailyBrief | null>(null);
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
+  const [stations, setStations] = useState<any[]>([]);
   
   const [selectedZone, setSelectedZone] = useState<ZoneWithLatest | null>(null);
   const [activeFilter, setActiveFilter] = useState<'ALL' | DecisionType>('ALL');
@@ -49,12 +50,13 @@ export const DashboardPage: React.FC = () => {
   const loadData = async () => {
     try {
       setIsLoading(true);
-      const [ov, zn, wt, br, al] = await Promise.all([
+      const [ov, zn, wt, br, al, st] = await Promise.all([
         api.getOverview().catch(() => null),
         api.getZones().catch(() => []),
         api.getWaterSavings(7, baselineRate, litersPerOp).catch(() => null),
         api.getDailyBrief().catch(() => null),
-        api.getAlerts(10).catch(() => [])
+        api.getAlerts(10).catch(() => []),
+        api.getStations().catch(() => [])
       ]);
 
       if (ov) setOverview(ov);
@@ -62,6 +64,7 @@ export const DashboardPage: React.FC = () => {
       if (wt) setWaterData(wt);
       if (br) setDailyBrief(br);
       setAlerts(al || []);
+      setStations(st || []);
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
     } finally {
@@ -169,6 +172,7 @@ export const DashboardPage: React.FC = () => {
             zones={zones}
             selectedZone={selectedZone}
             onSelectZone={setSelectedZone}
+            stations={stations}
             height="480px"
           />
         </div>

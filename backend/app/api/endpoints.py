@@ -13,7 +13,12 @@ from app.models.domain import (
     CitizenReport,
     RewardItem,
     ViolationCategory,
-    ReportStatus
+    ReportStatus,
+    PollutantValue,
+    WeatherConditions,
+    FireSummary,
+    NearbyInfrastructure,
+    ConfidenceLevel
 )
 from app.schemas.api_models import (
     SystemOverviewResponse,
@@ -35,7 +40,10 @@ from app.schemas.api_models import (
     CandidateRoadSegmentsResponse,
     ForecastWindowsResponse,
     StrategyComparisonResponse,
-    InterventionLogCreateRequest
+    InterventionLogCreateRequest,
+    GeocodingPlace,
+    StationObservation,
+    LocationAnalysisResponse
 )
 from app.models.domain import InterventionOutcomeRecord
 from app.repositories.local_repository import SQLiteRepository
@@ -46,6 +54,7 @@ from app.services.ai_brief_service import AiBriefService
 from app.services.spatial_service import SpatialService
 from app.services.forecast_service import ForecastService
 from app.services.predictive_model_service import PredictiveModelService
+from app.services.geocoding_service import GeocodingService
 
 router = APIRouter()
 
@@ -64,15 +73,19 @@ ai_brief_service = AiBriefService()
 spatial_service = SpatialService()
 forecast_service = ForecastService()
 predictive_service = PredictiveModelService()
+geocoding_service = GeocodingService()
 
-def calculate_indian_aqi(pm10: Optional[float], pm25: Optional[float]) -> int:
+def calculate_indian_aqi(pm10: Optional[float], pm25: Optional[float]) -> Optional[int]:
     """
     Computes Indian National Air Quality Index (CPCB breakpoint formula)
-    for PM10 (24h) and PM2.5 (24h).
+    for PM10 (24h) and PM2.5 (24h). Returns None if neither measurement is available.
     """
-    def calc_sub_index(conc: Optional[float], breakpoints: list) -> int:
+    if (pm10 is None or pm10 < 0) and (pm25 is None or pm25 < 0):
+        return None
+
+    def calc_sub_index(conc: Optional[float], breakpoints: list) -> Optional[int]:
         if conc is None or conc < 0:
-            return 0
+            return None
         for (c_low, c_high, i_low, i_high) in breakpoints:
             if c_low <= conc <= c_high:
                 return int(round(((i_high - i_low) / (c_high - c_low)) * (conc - c_low) + i_low))
@@ -80,7 +93,7 @@ def calculate_indian_aqi(pm10: Optional[float], pm25: Optional[float]) -> int:
             # Extrapolate beyond severe threshold
             c_low, c_high, i_low, i_high = breakpoints[-1]
             return min(500, int(round(i_high + (conc - c_high) * 0.5)))
-        return 0
+        return None
 
     pm10_bp = [
         (0, 50, 0, 50),
@@ -101,7 +114,10 @@ def calculate_indian_aqi(pm10: Optional[float], pm25: Optional[float]) -> int:
 
     sub_pm10 = calc_sub_index(pm10, pm10_bp)
     sub_pm25 = calc_sub_index(pm25, pm25_bp)
-    return max(sub_pm10, sub_pm25, 25)
+    sub_indices = [s for s in (sub_pm10, sub_pm25) if s is not None]
+    if not sub_indices:
+        return None
+    return max(sub_indices)
 
 @router.get("/health")
 def get_health():
@@ -256,7 +272,9 @@ def get_zone_atmospheric_analysis(zone_id: str):
         except Exception:
             freshness_sec = 1800
 
-    station_dist = (reading.pm10.station_distance_km if reading and reading.pm10 else None) or 4.5
+    station_dist = (reading.pm10.station_distance_km if reading and reading.pm10 else None)
+    contributing_count = 1 if (reading and reading.pm10.data_type == "observed") else (2 if reading and reading.pm10.data_type == "interpolated" else 0)
+    cov_rating = "GOOD" if (station_dist is not None and station_dist <= 10.0) else ("FAIR" if (station_dist is not None and station_dist <= 25.0) else "MODELED")
 
     return AtmosphericAnalysisResponse(
         zone_id=zone.zone_id,
@@ -287,9 +305,9 @@ def get_zone_atmospheric_analysis(zone_id: str):
         estimated_surface_drying_time_min=w.estimated_surface_drying_time_min if w else None,
         boundary_layer_height_m=w.boundary_layer_height_m if w else None,
         inversion_detected=(w.boundary_layer_height_m or 999) <= 300 if w else False,
-        contributing_stations_count=2 if reading and reading.pm10.data_type == "observed" else 1,
+        contributing_stations_count=contributing_count,
         nearest_station_distance_km=station_dist,
-        spatial_coverage_rating="GOOD" if station_dist <= 10.0 else "FAIR",
+        spatial_coverage_rating=cov_rating,
         data_freshness_seconds=freshness_sec,
         decision=decision.decision.value if decision else "ADVISORY_ONLY",
         decision_rationale=decision.reasons if decision else ["Awaiting telemetry."],
@@ -320,13 +338,17 @@ def get_zone_candidate_segments(zone_id: str):
     )
 
 @router.get("/zones/{zone_id}/forecast-windows", response_model=ForecastWindowsResponse)
-def get_zone_forecast_windows(zone_id: str):
+async def get_zone_forecast_windows(zone_id: str):
     zone = repository.get_zone(zone_id)
     if not zone:
         raise HTTPException(status_code=404, detail=f"Zone '{zone_id}' not found")
 
+    # Fetch live numerical forecast from Open-Meteo for this zone
+    w_res = await ingestion_service.open_meteo.get_weather(zone.latitude, zone.longitude)
+    raw_hourly = w_res.data.get("raw_hourly") if w_res.is_success and w_res.data else None
+
     # Evaluate future operating windows
-    windows = forecast_service.evaluate_hourly_windows(None, zone_id, limit_hours=12)
+    windows = forecast_service.evaluate_hourly_windows(raw_hourly, zone_id, limit_hours=12)
     optimal_count = sum(1 for w in windows if w.suitability_label == "OPTIMAL")
     best_window = windows[0] if windows else None
 
@@ -772,4 +794,274 @@ def redeem_reward_item(req: RewardRedeemRequest):
     if not result:
         raise HTTPException(status_code=400, detail="Insufficient ClearSky Points or invalid item ID.")
     return RewardRedeemResponse(**result)
+
+# =======================================================
+# Real Geographic Discovery & Location Analysis Endpoints
+# =======================================================
+
+@router.get("/geo/search", response_model=List[GeocodingPlace])
+async def search_geographic_locations(
+    q: str = Query(..., min_length=1, description="City, locality, neighborhood, or address to discover"),
+    limit: int = Query(6, ge=1, le=15)
+):
+    """Search real geographic localities, neighborhoods, and landmarks via OpenStreetMap Nominatim."""
+    results = await geocoding_service.search_places(q, limit=limit)
+    return [GeocodingPlace(**r) for r in results]
+
+@router.get("/geo/reverse", response_model=GeocodingPlace)
+async def reverse_geocode_location(
+    lat: float = Query(..., ge=-90.0, le=90.0),
+    lon: float = Query(..., ge=-180.0, le=180.0)
+):
+    """Resolve real locality name and address from coordinates clicked on the map."""
+    res = await geocoding_service.reverse_geocode(lat, lon)
+    return GeocodingPlace(**res)
+
+@router.get("/stations", response_model=List[StationObservation])
+async def list_environmental_stations(
+    lat: float = Query(28.6139, ge=-90.0, le=90.0),
+    lon: float = Query(77.2090, ge=-180.0, le=180.0),
+    radius_km: float = Query(35.0, ge=1.0, le=100.0)
+):
+    """
+    Retrieve real ground monitoring stations (OpenAQ v3 and DPCC continuous stations)
+    within the specified geographic radius with distance and observed pollutants.
+    """
+    st_res = await ingestion_service.openaq.get_nearby_station_measurements(lat, lon, radius_km=radius_km)
+    stations: List[StationObservation] = []
+    seen_ids = set()
+
+    if st_res.is_success and st_res.data:
+        for s in st_res.data:
+            s_id = str(s.get("station_id", ""))
+            if s_id and s_id not in seen_ids:
+                seen_ids.add(s_id)
+                stations.append(StationObservation(
+                    station_id=f"OPENAQ-{s_id}",
+                    station_name=s.get("station_name", "OpenAQ Ground Station"),
+                    latitude=s.get("latitude", lat),
+                    longitude=s.get("longitude", lon),
+                    distance_km=s.get("distance_km", 0.0),
+                    pm25=s.get("pm25"),
+                    pm10=s.get("pm10"),
+                    observed_at=s.get("observed_at"),
+                    provider="OpenAQ API v3 Ground Station"
+                ))
+
+    # Incorporate monitored Delhi NCR DPCC reference stations
+    zones = repository.list_zones()
+    for z in zones:
+        dist = ingestion_service.estimation.haversine_km(lat, lon, z.latitude, z.longitude)
+        if dist <= radius_km and z.zone_id not in seen_ids:
+            seen_ids.add(z.zone_id)
+            rd = repository.get_latest_reading(z.zone_id)
+            stations.append(StationObservation(
+                station_id=z.zone_id,
+                station_name=f"{z.name} (DPCC Station)",
+                latitude=z.latitude,
+                longitude=z.longitude,
+                distance_km=round(dist, 2),
+                pm25=rd.pm25.value if rd and rd.pm25 else None,
+                pm10=rd.pm10.value if rd and rd.pm10 else None,
+                observed_at=rd.timestamp if rd else None,
+                provider="CPCB / DPCC Continuous Ambient Air Station"
+            ))
+
+    stations.sort(key=lambda s: s.distance_km)
+    return stations
+
+@router.get("/locations/analyze", response_model=LocationAnalysisResponse)
+async def analyze_arbitrary_location(
+    lat: float = Query(..., ge=-90.0, le=90.0),
+    lon: float = Query(..., ge=-180.0, le=180.0),
+    name: Optional[str] = Query(None)
+):
+    """
+    Perform a complete real-time atmospheric and particulate analysis for ANY selected coordinate.
+    Queries live Open-Meteo weather and pressure, queries OpenAQ ground stations within 25km,
+    evaluates coarse dust dominance, runs the deterministic decision engine, and computes hourly windows.
+    """
+    now_dt = datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat().replace("+00:00", "Z")
+
+    # Determine real locality name
+    if not name or name.strip() == "":
+        rev = await geocoding_service.reverse_geocode(lat, lon)
+        place_name = rev.get("place_name", f"Locality ({lat:.3f}, {lon:.3f})")
+        display_name = rev.get("display_name", place_name)
+    else:
+        place_name = name.strip()
+        display_name = f"{place_name}, Delhi NCR"
+
+    # 1. Real weather and surface pressure for this exact coordinate
+    w_res = await ingestion_service.open_meteo.get_weather(lat, lon)
+    weather_cond = WeatherConditions()
+    raw_hourly = None
+    if w_res.is_success and w_res.data:
+        weather_cond = WeatherConditions(**{
+            k: v for k, v in w_res.data.items() if k in WeatherConditions.model_fields
+        })
+        raw_hourly = w_res.data.get("raw_hourly")
+
+    # 2. Real air quality observations nearby via OpenAQ
+    st_res = await ingestion_service.openaq.get_nearby_station_measurements(lat, lon, radius_km=25.0)
+    stations_data = st_res.data if st_res.is_success else []
+
+    # Query modeled air quality for the coordinate as fallback
+    modeled_pm25 = None
+    modeled_pm10 = None
+    aq_res = await ingestion_service.open_meteo.get_air_quality(lat, lon)
+    if aq_res.is_success and aq_res.data:
+        modeled_pm25 = aq_res.data.get("pm25")
+        modeled_pm10 = aq_res.data.get("pm10")
+
+    pm25_val_obj, pm25_meta = ingestion_service.estimation.estimate_pollutant("pm25", lat, lon, stations_data, modeled_pm25)
+    pm10_val_obj, pm10_meta = ingestion_service.estimation.estimate_pollutant("pm10", lat, lon, stations_data, modeled_pm10)
+
+    # Compute official Indian CPCB AQI from valid measurements
+    aqi = calculate_indian_aqi(pm10_val_obj.value, pm25_val_obj.value)
+
+    # Coarse/fine ratio
+    ratio = None
+    if pm25_val_obj.value and pm25_val_obj.value > 0.1 and pm10_val_obj.value is not None:
+        ratio = round(pm10_val_obj.value / pm25_val_obj.value, 2)
+
+    # 3. Check satellite thermal anomalies via NASA FIRMS
+    f_res = await ingestion_service.firms.check_nearby_fires(lat, lon, wind_direction_deg=weather_cond.wind_direction_deg)
+    fire_sum = FireSummary(**f_res.data) if f_res.is_success else FireSummary()
+
+    # 4. Synthesize zone model for DecisionEngine evaluation
+    temp_zone = Zone(
+        zone_id=f"LOC-{round(lat, 3)}-{round(lon, 3)}",
+        name=place_name,
+        latitude=lat,
+        longitude=lon,
+        description=f"User-selected real locality: {display_name}",
+        zone_type="Dynamic Monitored Locality",
+        nearby_infrastructure=NearbyInfrastructure(
+            major_roads=[f"{place_name} Corridor", f"{place_name} Arterial Road"],
+            construction_sites=[],
+            has_construction_nearby=False,
+            construction_distance_meters=None
+        )
+    )
+
+    reading = EnvironmentalReading(
+        reading_id=f"RD-LOC-{now_iso}",
+        zone_id=temp_zone.zone_id,
+        timestamp=now_iso,
+        pm25=pm25_val_obj,
+        pm10=pm10_val_obj,
+        pm_ratio=ratio,
+        weather=weather_cond,
+        fire_summary=fire_sum,
+        data_mode=DataMode.LIVE if (pm25_val_obj.data_type in ("observed", "modeled")) else DataMode.CACHED,
+        is_stale=False
+    )
+
+    decision_rec = ingestion_service.decision_engine.evaluate(
+        zone=temp_zone,
+        reading=reading,
+        scored_at=now_iso,
+        source_status={"openaq": "available" if stations_data else "offline", "open_meteo": "available"}
+    )
+
+    # 5. Hourly forecast windows from real Open-Meteo numerical predictions
+    windows = forecast_service.evaluate_hourly_windows(raw_hourly, temp_zone.zone_id, limit_hours=12)
+
+    # 6. Candidate road segments
+    candidate_segs = spatial_service.get_candidate_road_segments(temp_zone, pm10_val_obj.value)
+
+    # 7. Nearest station details
+    nearest_st = None
+    if stations_data:
+        sorted_st = sorted(stations_data, key=lambda s: s.get("distance_km", 999))
+        c_st = sorted_st[0]
+        nearest_st = StationObservation(
+            station_id=f"OPENAQ-{c_st.get('station_id')}",
+            station_name=c_st.get("station_name", "OpenAQ Ground Station"),
+            latitude=c_st.get("latitude", lat),
+            longitude=c_st.get("longitude", lon),
+            distance_km=c_st.get("distance_km", 0.0),
+            pm25=c_st.get("pm25"),
+            pm10=c_st.get("pm10"),
+            observed_at=c_st.get("observed_at"),
+            provider="OpenAQ API v3 Ground Station"
+        )
+
+    station_dist = pm10_val_obj.station_distance_km or pm25_val_obj.station_distance_km
+
+    # Drift risk assessment
+    ws = weather_cond.wind_speed_kmh
+    if ws is not None:
+        if ws >= 20.0:
+            drift_risk = "PROHIBITIVE: Severe spray drift will carry water droplets away from target before deposition."
+        elif ws >= 14.0:
+            drift_risk = "MODERATE: Spray cone will experience drift; lower cannon elevation required."
+        else:
+            drift_risk = "LOW: Gentle breeze facilitates direct localized road surface settling."
+    else:
+        drift_risk = "UNKNOWN: Wind speed telemetry unavailable."
+
+    # Ratio interpretation
+    if ratio is not None:
+        if ratio >= 2.0:
+            ratio_interp = f"PM10/PM2.5 ratio is {ratio:.2f} >= 2.0. Disproportionate coarse particulate elevation consistent with fugitive mechanical road dust or construction resuspension."
+        else:
+            ratio_interp = f"PM10/PM2.5 ratio is {ratio:.2f} < 2.0. Particulate mass dominated by fine sub-micron aerosols (vehicular soot, combustion emissions)."
+    else:
+        ratio_interp = "PM ratio unavailable due to incomplete PM2.5 or PM10 measurements."
+
+    # Pressure interpretation
+    press_val = weather_cond.surface_pressure_hpa
+    p_tend = weather_cond.pressure_tendency or "STEADY"
+    p_3h = weather_cond.pressure_trend_3h_hpa
+    if p_tend == "FALLING":
+        press_interp = f"Barometric pressure is falling ({p_3h:+.1f} hPa/3h). May indicate approaching weather trough or localized gustiness. Evaluated as supporting meteorological context."
+    elif p_tend == "RISING":
+        press_interp = f"Barometric pressure is rising ({p_3h:+.1f} hPa/3h). Consistent with building regional anticyclone / subsidence. Evaluated as supporting meteorological context."
+    else:
+        press_interp = "Surface pressure is steady with minor diurnal fluctuations. Supporting meteorological evidence confirms stable barometric conditions."
+
+    cov_rating = "GOOD" if (station_dist is not None and station_dist <= 10.0) else ("FAIR" if (station_dist is not None and station_dist <= 25.0) else "MODELED")
+
+    return LocationAnalysisResponse(
+        location_name=place_name,
+        display_name=display_name,
+        latitude=lat,
+        longitude=lon,
+        timestamp=now_iso,
+        aqi_estimate=aqi,
+        aqi_standard="Indian National AQI (CPCB Standard)",
+        pm10=pm10_val_obj,
+        pm25=pm25_val_obj,
+        pm_ratio=ratio,
+        pm_ratio_interpretation=ratio_interp,
+        weather=weather_cond,
+        surface_pressure_hpa=press_val,
+        pressure_trend_3h_hpa=p_3h,
+        pressure_trend_6h_hpa=weather_cond.pressure_trend_6h_hpa,
+        pressure_tendency=p_tend,
+        pressure_interpretation=press_interp,
+        wind_drift_risk=drift_risk,
+        evaporation_rate_mmh=weather_cond.evaporation_rate_mmh,
+        estimated_surface_drying_time_min=weather_cond.estimated_surface_drying_time_min,
+        nearest_station=nearest_st,
+        contributing_stations_count=len(stations_data),
+        spatial_coverage_rating=cov_rating,
+        data_freshness_seconds=0,
+        confidence=decision_rec.confidence,
+        data_mode=decision_rec.data_mode,
+        decision=decision_rec.decision,
+        priority=decision_rec.priority,
+        reasons=decision_rec.reasons,
+        warnings=decision_rec.warnings,
+        triggered_rules=decision_rec.triggered_rules,
+        conditions_to_change=decision_rec.conditions_to_change,
+        forecast_windows=windows,
+        candidate_segments=candidate_segs,
+        nearby_infrastructure=temp_zone.nearby_infrastructure,
+        fire_summary=fire_sum
+    )
+
 

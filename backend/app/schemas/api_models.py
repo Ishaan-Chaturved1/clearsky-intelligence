@@ -1,6 +1,20 @@
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field
-from app.models.domain import Zone, DecisionRecord, EnvironmentalReading, DataMode, StrategyComparisonScenario
+from app.models.domain import (
+    Zone,
+    DecisionRecord,
+    EnvironmentalReading,
+    DataMode,
+    StrategyComparisonScenario,
+    PollutantValue,
+    WeatherConditions,
+    FireSummary,
+    NearbyInfrastructure,
+    ConfidenceLevel,
+    DecisionType,
+    CandidateRoadSegment,
+    ForecastWindow
+)
 
 class SystemOverviewResponse(BaseModel):
     total_monitored_zones: int
@@ -134,7 +148,7 @@ class AtmosphericAnalysisResponse(BaseModel):
     latitude: float
     longitude: float
     timestamp: str
-    aqi_estimate: int
+    aqi_estimate: Optional[int] = None
     aqi_standard: str = "Indian National AQI (CPCB Standard)"
     pm10_value: Optional[float] = None
     pm25_value: Optional[float] = None
@@ -204,3 +218,62 @@ class InterventionLogCreateRequest(BaseModel):
     post_intervention_pm10_3h: Optional[float] = None
     control_zone_pm10: Optional[float] = None
     notes: Optional[str] = None
+
+class GeocodingPlace(BaseModel):
+    place_name: str
+    display_name: str
+    latitude: float
+    longitude: float
+    type: Optional[str] = None
+    osm_type: Optional[str] = None
+    boundingbox: Optional[List[str]] = None
+
+class StationObservation(BaseModel):
+    station_id: str
+    station_name: str
+    latitude: float
+    longitude: float
+    distance_km: float
+    pm25: Optional[float] = None
+    pm10: Optional[float] = None
+    observed_at: Optional[str] = None
+    provider: str = "OpenAQ API v3"
+
+class LocationAnalysisResponse(BaseModel):
+    location_name: str
+    display_name: str
+    latitude: float
+    longitude: float
+    timestamp: str
+    aqi_estimate: Optional[int] = None
+    aqi_standard: str = "Indian National AQI (CPCB Standard)"
+    pm10: PollutantValue
+    pm25: PollutantValue
+    pm_ratio: Optional[float] = None
+    pm_ratio_interpretation: str
+    weather: WeatherConditions
+    surface_pressure_hpa: Optional[float] = None
+    pressure_trend_3h_hpa: Optional[float] = None
+    pressure_trend_6h_hpa: Optional[float] = None
+    pressure_tendency: str = "STEADY"
+    pressure_interpretation: str
+    wind_drift_risk: str
+    evaporation_rate_mmh: Optional[float] = None
+    estimated_surface_drying_time_min: Optional[int] = None
+    nearest_station: Optional[StationObservation] = None
+    contributing_stations_count: int = 0
+    spatial_coverage_rating: str = "GOOD"
+    data_freshness_seconds: int = 0
+    confidence: ConfidenceLevel
+    data_mode: DataMode
+    decision: DecisionType
+    priority: Optional[int] = None
+    reasons: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    triggered_rules: List[str] = Field(default_factory=list)
+    conditions_to_change: List[str] = Field(default_factory=list)
+    forecast_windows: List[ForecastWindow] = Field(default_factory=list)
+    candidate_segments: List[CandidateRoadSegment] = Field(default_factory=list)
+    nearby_infrastructure: Optional[NearbyInfrastructure] = None
+    fire_summary: FireSummary = Field(default_factory=FireSummary)
+

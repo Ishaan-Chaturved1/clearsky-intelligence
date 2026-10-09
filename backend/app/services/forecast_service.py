@@ -40,32 +40,9 @@ class ForecastService:
         """
         windows: List[ForecastWindow] = []
         if not raw_hourly or "time" not in raw_hourly:
-            # Fallback realistic 12-hour forecast based on diurnal cycles
-            now = datetime.now(timezone.utc)
-            base_temp = 28.0
-            base_rh = 55.0
-            base_ws = 9.0
-            for h in range(1, limit_hours + 1):
-                window_dt = now + timedelta(hours=h)
-                # Diurnal simulation: cooler/higher RH at night, warmer/lower RH mid-day
-                hour_of_day = window_dt.hour
-                temp = round(base_temp + 5.0 * math.sin((hour_of_day - 9) * math.pi / 12), 1)
-                rh = round(max(30.0, min(85.0, base_rh - 20.0 * math.sin((hour_of_day - 9) * math.pi / 12))), 1)
-                ws = round(max(3.0, base_ws + 3.0 * math.cos((hour_of_day - 14) * math.pi / 12)), 1)
-                precip = 0.0
-                pressure = round(1013.2 - 1.5 * math.sin((hour_of_day - 12) * math.pi / 12), 1)
-
-                win = self._score_single_window(
-                    window_id=f"WIN-{zone_id}-{window_dt.strftime('%Y%m%d%H')}",
-                    dt=window_dt,
-                    temp=temp,
-                    rh=rh,
-                    ws=ws,
-                    precip=precip,
-                    pressure=pressure
-                )
-                windows.append(win)
-            return sorted(windows, key=lambda w: w.suitability_score, reverse=True)
+            # When raw numerical weather prediction is missing, return empty rather than fabricating data
+            logger.info(f"No raw hourly forecast data available for {zone_id}")
+            return []
 
         times = raw_hourly.get("time", [])
         temps = raw_hourly.get("temperature_2m", [])

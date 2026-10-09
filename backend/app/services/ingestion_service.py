@@ -114,31 +114,27 @@ class IngestionService:
             pm25_pollutant = PollutantValue(value=None, data_type="unavailable")
             pm10_pollutant = PollutantValue(value=None, data_type="unavailable")
 
-        # If data is completely unavailable or we are in DEMO mode and no live data arrived, use previous reading if exists
+        # If live telemetry is incomplete, check for latest valid cached observation
         if pm25_pollutant.value is None or pm10_pollutant.value is None:
             prev_reading = self.repository.get_latest_reading(zone.zone_id)
-            if prev_reading:
+            if prev_reading and prev_reading.pm10.value is not None:
+                # Retain previous reading with its original observation timestamp and cached indicator
                 reading = prev_reading
-                reading.timestamp = now_iso
+                reading.data_mode = DataMode.CACHED
+                reading.is_stale = True
             else:
-                # Default baseline fallback reading
+                # Explicit unavailable state — never fabricate plausible-looking fake values
                 reading = EnvironmentalReading(
                     reading_id=f"RD-{zone.zone_id}-{now_iso}",
                     zone_id=zone.zone_id,
                     timestamp=now_iso,
-                    pm25=PollutantValue(value=55.0, data_type="modeled"),
-                    pm10=PollutantValue(value=140.0, data_type="modeled"),
-                    pm_ratio=2.55,
-                    weather=WeatherConditions(
-                        temperature_c=28.5,
-                        relative_humidity=52.0,
-                        wind_speed_kmh=8.5,
-                        wind_direction_deg=280.0,
-                        boundary_layer_height_m=420.0
-                    ),
-                    fire_summary=FireSummary(),
-                    data_mode=DataMode.DEMO,
-                    is_stale=False
+                    pm25=pm25_pollutant,
+                    pm10=pm10_pollutant,
+                    pm_ratio=None,
+                    weather=weather_cond,
+                    fire_summary=fire_summary,
+                    data_mode=data_mode,
+                    is_stale=True
                 )
         else:
             ratio = None
