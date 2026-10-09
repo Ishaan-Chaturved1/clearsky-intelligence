@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field
-from app.models.domain import Zone, DecisionRecord, EnvironmentalReading, DataMode
+from app.models.domain import Zone, DecisionRecord, EnvironmentalReading, DataMode, StrategyComparisonScenario
 
 class SystemOverviewResponse(BaseModel):
     total_monitored_zones: int
@@ -127,3 +127,80 @@ class RewardRedeemResponse(BaseModel):
     points_spent: int
     remaining_points: int
     instructions: str
+
+class AtmosphericAnalysisResponse(BaseModel):
+    zone_id: str
+    zone_name: str
+    latitude: float
+    longitude: float
+    timestamp: str
+    aqi_estimate: int
+    aqi_standard: str = "Indian National AQI (CPCB Standard)"
+    pm10_value: Optional[float] = None
+    pm25_value: Optional[float] = None
+    pm_ratio: Optional[float] = None
+    pm_ratio_interpretation: str
+    temperature_c: Optional[float] = None
+    relative_humidity: Optional[float] = None
+    surface_pressure_hpa: Optional[float] = None
+    pressure_trend_3h_hpa: Optional[float] = None
+    pressure_trend_6h_hpa: Optional[float] = None
+    pressure_trend_12h_hpa: Optional[float] = None
+    pressure_tendency: str = "STEADY"
+    pressure_interpretation: str
+    wind_speed_kmh: Optional[float] = None
+    wind_direction_deg: Optional[float] = None
+    wind_drift_risk: str
+    precipitation_mmh: Optional[float] = 0.0
+    rain_suppression_active: bool = False
+    evaporation_rate_mmh: Optional[float] = None
+    estimated_surface_drying_time_min: Optional[int] = None
+    boundary_layer_height_m: Optional[float] = None
+    inversion_detected: bool = False
+    contributing_stations_count: int = 0
+    nearest_station_distance_km: Optional[float] = None
+    spatial_coverage_rating: str = "GOOD"
+    data_freshness_seconds: int = 0
+    decision: str
+    decision_rationale: List[str] = Field(default_factory=list)
+    triggered_rules: List[str] = Field(default_factory=list)
+    conditions_to_change_decision: List[str] = Field(default_factory=list)
+
+class CandidateRoadSegmentsResponse(BaseModel):
+    zone_id: str
+    zone_name: str
+    total_segments: int
+    total_water_required_liters: float
+    total_tanker_trips: int
+    segments: List[Any]  # CandidateRoadSegment objects
+
+class ForecastWindowsResponse(BaseModel):
+    zone_id: str
+    zone_name: str
+    forecast_source: str = "Open-Meteo Hourly Numerical Weather Prediction"
+    optimal_windows_count: int
+    best_window: Optional[Any] = None  # ForecastWindow
+    windows: List[Any]  # List[ForecastWindow]
+    forecasting_disclaimer: str
+
+class StrategyComparisonResponse(BaseModel):
+    number_of_zones: int
+    reporting_period_days: int
+    tanker_capacity_liters: float
+    scenarios: List[StrategyComparisonScenario]
+    methodology_summary: str
+    audit_notes: str
+
+class InterventionLogCreateRequest(BaseModel):
+    zone_id: str
+    road_segment_id: Optional[str] = None
+    timestamp_start: str
+    timestamp_end: str
+    water_volume_liters: float
+    tanker_capacity_liters: float = 5000.0
+    method: str = "MIST_CANNON"  # 'MIST_CANNON', 'ROAD_WETTING', 'MECHANICAL_SWEEPER'
+    pre_intervention_pm10: float
+    post_intervention_pm10_1h: Optional[float] = None
+    post_intervention_pm10_3h: Optional[float] = None
+    control_zone_pm10: Optional[float] = None
+    notes: Optional[str] = None

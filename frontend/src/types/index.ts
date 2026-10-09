@@ -1,4 +1,10 @@
-export type DecisionType = 'INTERVENTION_RECOMMENDED' | 'INTERVENTION_NOT_RECOMMENDED' | 'ADVISORY_ONLY';
+export type DecisionType =
+  | 'INTERVENTION_RECOMMENDED'
+  | 'TARGETED_INTERVENTION_RECOMMENDED'
+  | 'INTERVENTION_NOT_RECOMMENDED'
+  | 'INTERVENTION_DISCOURAGED'
+  | 'ADVISORY_ONLY'
+  | 'ALTERNATIVE_DUST_CONTROL_SUGGESTED';
 
 export type ConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW';
 
@@ -32,8 +38,16 @@ export interface PollutantValue {
 export interface WeatherConditions {
   temperature_c?: number | null;
   relative_humidity?: number | null;
+  surface_pressure_hpa?: number | null;
+  pressure_trend_3h_hpa?: number | null;
+  pressure_trend_6h_hpa?: number | null;
+  pressure_trend_12h_hpa?: number | null;
+  pressure_tendency?: string | null;
   wind_speed_kmh?: number | null;
   wind_direction_deg?: number | null;
+  precipitation_mmh?: number | null;
+  evaporation_rate_mmh?: number | null;
+  estimated_surface_drying_time_min?: number | null;
   boundary_layer_height_m?: number | null;
   data_type?: string;
 }
@@ -78,10 +92,14 @@ export interface DecisionRecord {
   weather: WeatherConditions;
   reasons: string[];
   warnings: string[];
+  triggered_rules?: string[];
+  conditions_to_change?: string[];
   source_status: Record<string, string>;
   data_mode: DataMode;
   observed_at: string;
   scored_at: string;
+  station_distance_km?: number | null;
+  data_freshness_seconds?: number | null;
 }
 
 export interface ZoneWithLatest {
@@ -129,6 +147,120 @@ export interface WaterSavingsAnalytics {
   is_simulation: boolean;
   data_source_mode: DataMode;
   assumptions_note: string;
+}
+
+export interface StrategyComparisonScenario {
+  strategy_id: string;
+  strategy_name: string;
+  water_used_liters: number;
+  water_saved_vs_baseline_liters: number;
+  water_saved_percent: number;
+  total_trips: number;
+  estimated_cost_inr: number;
+  cost_savings_inr: number;
+  intervention_frequency: string;
+  suitability_notes: string;
+}
+
+export interface StrategyComparisonResponse {
+  number_of_zones: number;
+  reporting_period_days: number;
+  tanker_capacity_liters: number;
+  scenarios: StrategyComparisonScenario[];
+  methodology_summary: string;
+  audit_notes: string;
+}
+
+export interface CandidateRoadSegment {
+  segment_id: string;
+  zone_id: string;
+  road_name: string;
+  road_classification: string;
+  length_km: number;
+  estimated_width_m: number;
+  surface_area_m2: number;
+  traffic_index: string;
+  construction_adjacent: boolean;
+  construction_distance_m?: number | null;
+  water_required_liters: number;
+  tanker_trips_required: number;
+  priority_score: number;
+  recommended_action: string;
+  estimated_cost_inr: number;
+}
+
+export interface CandidateRoadSegmentsResponse {
+  zone_id: string;
+  zone_name: string;
+  total_segments: number;
+  total_water_required_liters: number;
+  total_tanker_trips: number;
+  segments: CandidateRoadSegment[];
+}
+
+export interface ForecastWindow {
+  window_id: string;
+  start_time: string;
+  end_time: string;
+  hour_label: string;
+  suitability_score: number;
+  suitability_label: string;
+  forecast_temp_c: number;
+  forecast_rh_percent: number;
+  forecast_wind_kmh: number;
+  forecast_precipitation_mmh: number;
+  forecast_pressure_hpa?: number | null;
+  rationale: string;
+  safety_concerns: string[];
+}
+
+export interface ForecastWindowsResponse {
+  zone_id: string;
+  zone_name: string;
+  forecast_source: string;
+  optimal_windows_count: number;
+  best_window?: ForecastWindow | null;
+  windows: ForecastWindow[];
+  forecasting_disclaimer: string;
+}
+
+export interface AtmosphericAnalysis {
+  zone_id: string;
+  zone_name: string;
+  latitude: number;
+  longitude: number;
+  timestamp: string;
+  aqi_estimate: number;
+  aqi_standard: string;
+  pm10_value: number | null;
+  pm25_value: number | null;
+  pm_ratio: number | null;
+  pm_ratio_interpretation: string;
+  temperature_c: number | null;
+  relative_humidity: number | null;
+  surface_pressure_hpa: number | null;
+  pressure_trend_3h_hpa: number | null;
+  pressure_trend_6h_hpa: number | null;
+  pressure_trend_12h_hpa: number | null;
+  pressure_tendency: string;
+  pressure_interpretation: string;
+  wind_speed_kmh: number | null;
+  wind_direction_deg: number | null;
+  wind_drift_risk: string;
+  precipitation_mmh: number;
+  rain_suppression_active: boolean;
+  evaporation_rate_mmh: number | null;
+  estimated_surface_drying_time_min: number | null;
+  boundary_layer_height_m: number | null;
+  inversion_detected: boolean;
+  contributing_stations_count: number;
+  nearest_station_distance_km: number | null;
+  spatial_coverage_rating: string;
+  data_freshness_seconds: number;
+  decision: string;
+  decision_rationale: string[];
+  triggered_rules: string[];
+  conditions_to_change_decision: string[];
 }
 
 export interface SourceDetail {
@@ -267,3 +399,22 @@ export interface CitizenReportCreateInput {
   channel?: string;
 }
 
+export interface InterventionOutcomeRecord {
+  intervention_id: string;
+  zone_id: string;
+  zone_name?: string | null;
+  road_segment_id?: string | null;
+  timestamp_start: string;
+  timestamp_end: string;
+  water_volume_liters: number;
+  tanker_capacity_liters: number;
+  method: string;
+  pre_intervention_pm10: number;
+  post_intervention_pm10_1h?: number | null;
+  post_intervention_pm10_3h?: number | null;
+  control_zone_pm10?: number | null;
+  observed_delta_pm10?: number | null;
+  weather_at_intervention: WeatherConditions;
+  status: string;
+  notes?: string | null;
+}

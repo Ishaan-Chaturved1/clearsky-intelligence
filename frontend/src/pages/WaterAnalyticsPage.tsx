@@ -14,11 +14,12 @@ import { KpiCard } from '../components/KpiCard';
 import { WaterAnalyticsChart } from '../components/WaterAnalyticsChart';
 import { AssumptionModal } from '../components/AssumptionModal';
 import { api } from '../services/api';
-import { WaterSavingsAnalytics } from '../types';
+import { WaterSavingsAnalytics, StrategyComparisonResponse, StrategyComparisonScenario } from '../types';
 import { formatNumber, formatInteger } from '../utils/formatters';
 
 export const WaterAnalyticsPage: React.FC = () => {
   const [analytics, setAnalytics] = useState<WaterSavingsAnalytics | null>(null);
+  const [strategyComparison, setStrategyComparison] = useState<StrategyComparisonResponse | null>(null);
   const [days, setDays] = useState(7);
   const [baselineRate, setBaselineRate] = useState(3.0);
   const [litersPerOp, setLitersPerOp] = useState(5000.0);
@@ -28,8 +29,12 @@ export const WaterAnalyticsPage: React.FC = () => {
   const loadData = async () => {
     try {
       setIsLoading(true);
-      const data = await api.getWaterSavings(days, baselineRate, litersPerOp);
+      const [data, strat] = await Promise.all([
+        api.getWaterSavings(days, baselineRate, litersPerOp),
+        api.getStrategyComparison(days, litersPerOp).catch(() => null)
+      ]);
       setAnalytics(data);
+      if (strat) setStrategyComparison(strat);
     } catch (err) {
       console.error('Failed to load water savings analytics:', err);
     } finally {
@@ -179,6 +184,109 @@ export const WaterAnalyticsPage: React.FC = () => {
           />
         )}
       </div>
+
+      {/* 4-Scenario Strategy Comparison Matrix */}
+      {strategyComparison && (
+        <div className="bg-white rounded-2xl border border-warm-200 shadow-warm-sm overflow-hidden space-y-4 p-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-4 border-b border-warm-200">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-sans text-[11px] font-semibold px-2 py-0.5 rounded-full bg-accent-500/10 text-accent-600 border border-accent-500/20">
+                  Multimodal Operational Models
+                </span>
+                <span className="text-xs text-earth-500 font-clarendon">
+                  {strategyComparison.reporting_period_days}-Day Strategic Evaluation ({strategyComparison.number_of_zones} Sectors)
+                </span>
+              </div>
+              <h3 className="font-sentinel font-bold text-lg text-earth-900">
+                Comparative Intervention Strategies Matrix
+              </h3>
+              <p className="text-xs font-clarendon text-earth-500">
+                Evaluating Scheduled spraying vs AQI-threshold spraying vs ClearSky targeted intelligence vs Alternative dust control.
+              </p>
+            </div>
+            <div className="text-xs font-mono text-earth-600 bg-warm-100 px-3 py-1.5 rounded-xl border border-warm-200">
+              Tanker: {formatInteger(strategyComparison.tanker_capacity_liters)} L
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-warm-100/70 text-earth-600 font-sans font-semibold uppercase text-[10px] tracking-wider border-b border-warm-200">
+                <tr>
+                  <th className="py-3 px-4">Strategy</th>
+                  <th className="py-3 px-3 text-right">Frequency / Policy</th>
+                  <th className="py-3 px-3 text-right">Water Used</th>
+                  <th className="py-3 px-3 text-right">Water Saved</th>
+                  <th className="py-3 px-3 text-right">Tanker Trips</th>
+                  <th className="py-3 px-3 text-right">Est. Cost (₹)</th>
+                  <th className="py-3 px-3 text-right">Cost Saved (₹)</th>
+                  <th className="py-3 px-4">Suitability / Risk Notes</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-warm-200">
+                {strategyComparison.scenarios.map((sc: StrategyComparisonScenario, i: number) => {
+                  const isClearSky = sc.strategy_id.includes('clearsky') || sc.strategy_name.includes('ClearSky');
+                  return (
+                    <tr
+                      key={i}
+                      className={`hover:bg-warm-50 transition-colors ${
+                        isClearSky ? 'bg-sage-50/60 font-semibold' : ''
+                      }`}
+                    >
+                      <td className="py-3.5 px-4">
+                        <div className="font-sentinel text-earth-900 font-bold flex items-center gap-1.5">
+                          {sc.strategy_name}
+                          {isClearSky && (
+                            <span className="text-[9px] font-sans font-bold bg-sage-500 text-white px-1.5 py-0.5 rounded">
+                              RECOMMENDED
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-3 text-right font-clarendon text-earth-700">
+                        {sc.intervention_frequency}
+                      </td>
+                      <td className="py-3.5 px-3 text-right font-mono font-tabular text-earth-800">
+                        {formatInteger(sc.water_used_liters)} L
+                      </td>
+                      <td className={`py-3.5 px-3 text-right font-mono font-tabular ${
+                        sc.water_saved_vs_baseline_liters > 0 ? 'text-sage-600 font-bold' : 'text-earth-400'
+                      }`}>
+                        {sc.water_saved_vs_baseline_liters > 0 ? `+${formatInteger(sc.water_saved_vs_baseline_liters)} L` : '0 L'}
+                      </td>
+                      <td className="py-3.5 px-3 text-right font-mono font-tabular text-earth-700">
+                        {sc.total_trips} trips
+                      </td>
+                      <td className="py-3.5 px-3 text-right font-mono font-tabular text-earth-800">
+                        ₹{formatInteger(sc.estimated_cost_inr)}
+                      </td>
+                      <td className={`py-3.5 px-3 text-right font-mono font-tabular ${
+                        sc.cost_savings_inr > 0 ? 'text-sage-600 font-bold' : 'text-earth-400'
+                      }`}>
+                        {sc.cost_savings_inr > 0 ? `₹${formatInteger(sc.cost_savings_inr)}` : '₹0'}
+                      </td>
+                      <td className="py-3.5 px-4 font-clarendon text-[11px] text-earth-600 max-w-[260px]">
+                        {sc.suitability_notes}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="p-4 bg-warm-100/70 rounded-xl border border-warm-200 text-xs font-clarendon text-earth-600 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <strong className="text-earth-800 font-sentinel">Audit Summary: </strong>
+              {strategyComparison.methodology_summary}
+            </div>
+            <div className="text-[10px] text-earth-400 italic font-mono flex-shrink-0">
+              {strategyComparison.audit_notes}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Assumptions & Formula Callout */}
       <div className="bg-warm-100/70 rounded-2xl p-5 border border-warm-300/80 text-xs text-earth-700">

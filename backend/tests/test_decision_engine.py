@@ -138,7 +138,7 @@ def test_construction_proximity_escalates_priority(engine):
     )
     reading = make_reading(pm25=70.0, pm10=280.0, rh=45.0, ws=6.0)
     decision = engine.evaluate(construction_zone, reading, "2026-10-09T08:00:00Z")
-    assert decision.decision == DecisionType.INTERVENTION_RECOMMENDED
+    assert decision.decision in [DecisionType.INTERVENTION_RECOMMENDED, DecisionType.TARGETED_INTERVENTION_RECOMMENDED]
     assert decision.priority >= 4
     assert any("construction" in r.lower() for r in decision.reasons)
 
@@ -154,3 +154,29 @@ def test_high_pm25_alone_does_not_trigger_intervention(engine, default_zone):
     decision = engine.evaluate(default_zone, reading, "2026-10-09T08:00:00Z")
     assert decision.decision == DecisionType.INTERVENTION_NOT_RECOMMENDED
     assert any("soot" in r.lower() or "combustion" in r.lower() for r in decision.reasons)
+
+def test_active_precipitation_discourages_intervention(engine, default_zone):
+    reading = make_reading(pm25=50.0, pm10=220.0, rh=65.0, ws=7.0)
+    reading.weather.precipitation_mmh = 0.8
+    decision = engine.evaluate(default_zone, reading, "2026-10-09T08:00:00Z")
+    assert decision.decision == DecisionType.INTERVENTION_NOT_RECOMMENDED
+    assert "GATE-ACTIVE-PRECIPITATION" in decision.triggered_rules
+    assert any("precipitation" in r.lower() or "rain" in r.lower() for r in decision.reasons)
+
+def test_severe_rapid_drying_suggests_alternative_dust_control(engine, default_zone):
+    reading = make_reading(pm25=60.0, pm10=240.0, rh=30.0, ws=12.0)
+    reading.weather.estimated_surface_drying_time_min = 8
+    decision = engine.evaluate(default_zone, reading, "2026-10-09T08:00:00Z")
+    assert decision.decision == DecisionType.ALTERNATIVE_DUST_CONTROL_SUGGESTED
+    assert "OPT-RAPID-DRYING-ALTERNATIVE" in decision.triggered_rules
+    assert any("drying" in r.lower() or "evaporation" in r.lower() for r in decision.reasons)
+
+def test_pressure_trend_included_as_supporting_context(engine, default_zone):
+    reading = make_reading(pm25=60.0, pm10=200.0, rh=50.0, ws=8.0)
+    reading.weather.surface_pressure_hpa = 1014.2
+    reading.weather.pressure_trend_3h_hpa = 1.8
+    reading.weather.pressure_tendency = "RISING"
+    decision = engine.evaluate(default_zone, reading, "2026-10-09T08:00:00Z")
+    assert any("1014.2" in r and "RISING" in r for r in decision.reasons)
+    assert len(decision.conditions_to_change) > 0
+    assert len(decision.triggered_rules) > 0

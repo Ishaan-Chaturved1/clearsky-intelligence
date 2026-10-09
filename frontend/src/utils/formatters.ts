@@ -44,33 +44,52 @@ export function getDecisionBadgeInfo(decision?: DecisionType | null): {
   dotColor: string;
 } {
   switch (decision) {
+    case 'TARGETED_INTERVENTION_RECOMMENDED':
+      return {
+        label: 'Targeted Intervention Recommended',
+        shortLabel: 'Targeted',
+        bgClass: 'bg-sage-500/15',
+        textClass: 'text-sage-700',
+        borderClass: 'border-sage-500/40',
+        dotColor: '#2D6A4F'
+      };
     case 'INTERVENTION_RECOMMENDED':
       return {
         label: 'Intervention Recommended',
         shortLabel: 'Recommended',
-        bgClass: 'bg-emerald-950/40',
-        textClass: 'text-emerald-400',
-        borderClass: 'border-emerald-500/40',
-        dotColor: '#10B981'
+        bgClass: 'bg-sage-500/10',
+        textClass: 'text-sage-700',
+        borderClass: 'border-sage-500/30',
+        dotColor: '#40916C'
       };
+    case 'INTERVENTION_DISCOURAGED':
     case 'INTERVENTION_NOT_RECOMMENDED':
       return {
         label: 'Intervention Discouraged',
         shortLabel: 'Discouraged',
-        bgClass: 'bg-rose-950/40',
-        textClass: 'text-rose-400',
-        borderClass: 'border-rose-500/40',
-        dotColor: '#EF4444'
+        bgClass: 'bg-rose-500/10',
+        textClass: 'text-rose-700',
+        borderClass: 'border-rose-500/30',
+        dotColor: '#E63946'
+      };
+    case 'ALTERNATIVE_DUST_CONTROL_SUGGESTED':
+      return {
+        label: 'Alternative Dust Control Suggested',
+        shortLabel: 'Alternative Control',
+        bgClass: 'bg-amber-500/15',
+        textClass: 'text-amber-700',
+        borderClass: 'border-amber-500/40',
+        dotColor: '#D97706'
       };
     case 'ADVISORY_ONLY':
     default:
       return {
-        label: 'Advisory Only (Uncertain)',
+        label: 'Advisory Only — Insufficient Evidence',
         shortLabel: 'Advisory Only',
-        bgClass: 'bg-slate-800/50',
-        textClass: 'text-slate-300',
-        borderClass: 'border-slate-600/40',
-        dotColor: '#94A3B8'
+        bgClass: 'bg-warm-200',
+        textClass: 'text-earth-600',
+        borderClass: 'border-warm-300',
+        dotColor: '#78716C'
       };
   }
 }

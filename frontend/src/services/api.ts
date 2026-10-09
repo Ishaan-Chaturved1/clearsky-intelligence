@@ -10,7 +10,12 @@ import {
   CitizenReport,
   RewardItem,
   CitizenWallet,
-  CitizenReportCreateInput
+  CitizenReportCreateInput,
+  AtmosphericAnalysis,
+  CandidateRoadSegmentsResponse,
+  ForecastWindowsResponse,
+  StrategyComparisonResponse,
+  InterventionOutcomeRecord
 } from '../types';
 
 const API_BASE = '/api';
@@ -43,6 +48,31 @@ export const api = {
     fetchJson<{ zone_id: string; readings: any[]; decisions: DecisionRecord[] }>(
       `${API_BASE}/zones/${zoneId}/history?limit=${limit}`
     ),
+
+  getZoneAtmosphericAnalysis: (zoneId: string) =>
+    fetchJson<AtmosphericAnalysis>(`${API_BASE}/zones/${zoneId}/atmospheric-analysis`),
+
+  getZoneCandidateSegments: (zoneId: string) =>
+    fetchJson<CandidateRoadSegmentsResponse>(`${API_BASE}/zones/${zoneId}/candidate-segments`),
+
+  getZoneForecastWindows: (zoneId: string) =>
+    fetchJson<ForecastWindowsResponse>(`${API_BASE}/zones/${zoneId}/forecast-windows`),
+
+  getStrategyComparison: (days = 7, tankerLiters = 5000.0) =>
+    fetchJson<StrategyComparisonResponse>(`${API_BASE}/analytics/strategy-comparison?days=${days}&tanker_liters=${tankerLiters}`),
+
+  getInterventions: (zoneId?: string) =>
+    fetchJson<InterventionOutcomeRecord[]>(`${API_BASE}/interventions${zoneId ? `?zone_id=${zoneId}` : ''}`),
+
+  logIntervention: (data: any) =>
+    fetchJson<InterventionOutcomeRecord>(`${API_BASE}/interventions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }),
+
+  getInterventionEffectiveness: () =>
+    fetchJson<any>(`${API_BASE}/interventions/effectiveness-summary`),
   
   getLatestDecisions: () => fetchJson<DecisionRecord[]>(`${API_BASE}/decisions/latest`),
   

@@ -4,8 +4,11 @@ from pydantic import BaseModel, Field
 
 class DecisionType(str, Enum):
     INTERVENTION_RECOMMENDED = "INTERVENTION_RECOMMENDED"
+    TARGETED_INTERVENTION_RECOMMENDED = "TARGETED_INTERVENTION_RECOMMENDED"
     INTERVENTION_NOT_RECOMMENDED = "INTERVENTION_NOT_RECOMMENDED"
+    INTERVENTION_DISCOURAGED = "INTERVENTION_DISCOURAGED"
     ADVISORY_ONLY = "ADVISORY_ONLY"
+    ALTERNATIVE_DUST_CONTROL_SUGGESTED = "ALTERNATIVE_DUST_CONTROL_SUGGESTED"
 
 class ConfidenceLevel(str, Enum):
     HIGH = "HIGH"
@@ -23,13 +26,23 @@ class PollutantValue(BaseModel):
     data_type: str = "modeled"  # 'observed', 'modeled', 'interpolated', 'unavailable'
     station_id: Optional[str] = None
     station_distance_km: Optional[float] = None
+    aqi_sub_index: Optional[int] = None
+    aqi_category: Optional[str] = None
 
 class WeatherConditions(BaseModel):
     temperature_c: Optional[float] = None
     relative_humidity: Optional[float] = None
+    surface_pressure_hpa: Optional[float] = None
+    pressure_trend_3h_hpa: Optional[float] = None
+    pressure_trend_6h_hpa: Optional[float] = None
+    pressure_trend_12h_hpa: Optional[float] = None
+    pressure_tendency: Optional[str] = "STEADY"  # 'FALLING', 'STEADY', 'RISING'
     wind_speed_kmh: Optional[float] = None
     wind_direction_deg: Optional[float] = None
     boundary_layer_height_m: Optional[float] = None
+    precipitation_mmh: Optional[float] = 0.0
+    evaporation_rate_mmh: Optional[float] = None
+    estimated_surface_drying_time_min: Optional[int] = None
     data_type: str = "modeled"
 
 class FireSummary(BaseModel):
@@ -75,10 +88,14 @@ class DecisionRecord(BaseModel):
     weather: WeatherConditions
     reasons: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+    triggered_rules: List[str] = Field(default_factory=list)
+    conditions_to_change: List[str] = Field(default_factory=list)
     source_status: Dict[str, str] = Field(default_factory=dict)
     data_mode: DataMode = DataMode.DEMO
     observed_at: str
     scored_at: str
+    station_distance_km: Optional[float] = None
+    data_freshness_seconds: Optional[int] = None
 
 class AlertRecord(BaseModel):
     alert_id: str
@@ -136,3 +153,75 @@ class RewardItem(BaseModel):
     sponsor: str
     in_stock: bool = True
     badge_label: Optional[str] = None
+
+class CandidateRoadSegment(BaseModel):
+    segment_id: str
+    zone_id: str
+    road_name: str
+    road_classification: str = "primary"  # 'trunk', 'primary', 'secondary'
+    length_km: float
+    estimated_width_m: float = 14.0
+    surface_area_m2: float
+    traffic_index: str = "HIGH"  # 'HIGH', 'MEDIUM', 'LOW'
+    construction_adjacent: bool = False
+    construction_distance_m: Optional[int] = None
+    water_required_liters: float
+    tanker_trips_required: int = 1
+    priority_score: int = 3  # 1 to 5
+    recommended_action: str = "TARGETED_SPRAYING"
+    estimated_cost_inr: float = 0.0
+
+class ForecastWindow(BaseModel):
+    window_id: str
+    start_time: str
+    end_time: str
+    hour_label: str
+    suitability_score: int  # 0 to 100
+    suitability_label: str  # 'OPTIMAL', 'MODERATE', 'POOR', 'PROHIBITED'
+    forecast_temp_c: float
+    forecast_rh_percent: float
+    forecast_wind_kmh: float
+    forecast_precipitation_mmh: float = 0.0
+    forecast_pressure_hpa: Optional[float] = None
+    rationale: str
+    safety_concerns: List[str] = Field(default_factory=list)
+
+class AlternativeDustControlMeasure(BaseModel):
+    strategy_type: str
+    name: str
+    suitability_reason: str
+    estimated_efficiency_percent: int
+    relative_water_saved_liters: float
+    recommended_duration_days: int = 7
+
+class InterventionOutcomeRecord(BaseModel):
+    intervention_id: str
+    zone_id: str
+    zone_name: Optional[str] = None
+    road_segment_id: Optional[str] = None
+    timestamp_start: str
+    timestamp_end: str
+    water_volume_liters: float
+    tanker_capacity_liters: float = 5000.0
+    method: str = "MIST_CANNON"  # 'MIST_CANNON', 'ROAD_WETTING', 'MECHANICAL_SWEEPER'
+    pre_intervention_pm10: float
+    post_intervention_pm10_1h: Optional[float] = None
+    post_intervention_pm10_3h: Optional[float] = None
+    control_zone_pm10: Optional[float] = None
+    observed_delta_pm10: Optional[float] = None
+    weather_at_intervention: WeatherConditions
+    status: str = "CALIBRATING"  # 'LOGGED', 'CALIBRATING', 'VERIFIED'
+    notes: Optional[str] = None
+
+class StrategyComparisonScenario(BaseModel):
+    strategy_id: str
+    strategy_name: str
+    water_used_liters: float
+    water_saved_vs_baseline_liters: float
+    water_saved_percent: float
+    total_trips: int
+    estimated_cost_inr: float
+    cost_savings_inr: float
+    intervention_frequency: str
+    suitability_notes: str
+

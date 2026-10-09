@@ -76,7 +76,14 @@ export const DashboardPage: React.FC = () => {
   // Filtered zones
   const filteredZones = zones.filter((item) => {
     if (activeFilter === 'ALL') return true;
-    return item.latest_decision?.decision === activeFilter;
+    const dec = item.latest_decision?.decision;
+    if (activeFilter === 'INTERVENTION_RECOMMENDED') {
+      return dec === 'INTERVENTION_RECOMMENDED' || dec === 'TARGETED_INTERVENTION_RECOMMENDED';
+    }
+    if (activeFilter === 'INTERVENTION_NOT_RECOMMENDED' || activeFilter === 'INTERVENTION_DISCOURAGED') {
+      return dec === 'INTERVENTION_DISCOURAGED' || dec === 'INTERVENTION_NOT_RECOMMENDED';
+    }
+    return dec === activeFilter;
   });
 
   const handleApplyAssumptions = (newRate: number, newLiters: number) => {
@@ -187,16 +194,36 @@ export const DashboardPage: React.FC = () => {
                 className={`px-2 py-1 rounded-lg font-sans ${
                   activeFilter === 'INTERVENTION_RECOMMENDED' ? 'bg-sage-500/10 text-sage-700 font-semibold' : 'text-earth-400'
                 }`}
+                title="Recommended & Targeted"
               >
                 Rec
               </button>
               <button
                 onClick={() => setActiveFilter('INTERVENTION_NOT_RECOMMENDED')}
                 className={`px-2 py-1 rounded-lg font-sans ${
-                  activeFilter === 'INTERVENTION_NOT_RECOMMENDED' ? 'bg-accent-500/10 text-accent-700 font-semibold' : 'text-earth-400'
+                  activeFilter === 'INTERVENTION_NOT_RECOMMENDED' || activeFilter === 'INTERVENTION_DISCOURAGED' ? 'bg-accent-500/10 text-accent-700 font-semibold' : 'text-earth-400'
                 }`}
+                title="Discouraged"
               >
                 Disc
+              </button>
+              <button
+                onClick={() => setActiveFilter('ADVISORY_ONLY')}
+                className={`px-2 py-1 rounded-lg font-sans ${
+                  activeFilter === 'ADVISORY_ONLY' ? 'bg-warm-200 text-earth-800 font-semibold' : 'text-earth-400'
+                }`}
+                title="Advisory Only"
+              >
+                Adv
+              </button>
+              <button
+                onClick={() => setActiveFilter('ALTERNATIVE_DUST_CONTROL_SUGGESTED')}
+                className={`px-2 py-1 rounded-lg font-sans ${
+                  activeFilter === 'ALTERNATIVE_DUST_CONTROL_SUGGESTED' ? 'bg-amber-500/10 text-amber-700 font-semibold' : 'text-earth-400'
+                }`}
+                title="Alternative Dust Control"
+              >
+                Alt
               </button>
             </div>
           </div>

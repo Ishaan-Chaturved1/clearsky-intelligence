@@ -76,3 +76,76 @@ def test_daily_brief_endpoint(client):
     data = res.json()
     assert "headline" in data
     assert "summary_text" in data
+
+def test_atmospheric_analysis_endpoint(client):
+    res = client.get("/api/zones/DEL-AV-01/atmospheric-analysis")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["zone_id"] == "DEL-AV-01"
+    assert "aqi_estimate" in data
+    assert "pressure_tendency" in data
+    assert "wind_drift_risk" in data
+    assert "decision" in data
+    assert len(data["decision_rationale"]) > 0
+
+def test_candidate_road_segments_endpoint(client):
+    res = client.get("/api/zones/DEL-AV-01/candidate-segments")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["zone_id"] == "DEL-AV-01"
+    assert data["total_segments"] >= 1
+    assert data["total_water_required_liters"] > 0
+    assert len(data["segments"]) >= 1
+    first_seg = data["segments"][0]
+    assert "surface_area_m2" in first_seg
+    assert "tanker_trips_required" in first_seg
+    assert "priority_score" in first_seg
+
+def test_forecast_windows_endpoint(client):
+    res = client.get("/api/zones/DEL-AV-01/forecast-windows")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["zone_id"] == "DEL-AV-01"
+    assert len(data["windows"]) >= 5
+    first_win = data["windows"][0]
+    assert "suitability_score" in first_win
+    assert "suitability_label" in first_win
+    assert "forecast_temp_c" in first_win
+
+def test_strategy_comparison_endpoint(client):
+    res = client.get("/api/analytics/strategy-comparison?days=7")
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data["scenarios"]) == 4
+    scen_ids = [s["strategy_id"] for s in data["scenarios"]]
+    assert "SCEN-01-SCHEDULED" in scen_ids
+    assert "SCEN-03-CLEARSKY-TARGETED" in scen_ids
+
+def test_intervention_logging_and_effectiveness(client):
+    # Test GET interventions
+    res_list = client.get("/api/interventions")
+    assert res_list.status_code == 200
+    assert len(res_list.json()) >= 1
+
+    # Test POST intervention
+    payload = {
+        "zone_id": "DEL-AV-01",
+        "timestamp_start": "2026-10-09T08:00:00Z",
+        "timestamp_end": "2026-10-09T08:30:00Z",
+        "water_volume_liters": 5000.0,
+        "method": "MIST_CANNON",
+        "pre_intervention_pm10": 290.0,
+        "post_intervention_pm10_1h": 240.0,
+        "notes": "Field trial validation run"
+    }
+    res_post = client.post("/api/interventions", json=payload)
+    assert res_post.status_code == 200
+    created = res_post.json()
+    assert created["observed_delta_pm10"] == 50.0
+
+    # Test summary
+    res_sum = client.get("/api/interventions/effectiveness-summary")
+    assert res_sum.status_code == 200
+    sum_data = res_sum.json()
+    assert sum_data["model_status"] == "EXPERIMENTAL_CALIBRATING"
+    assert sum_data["sample_size"] >= 2

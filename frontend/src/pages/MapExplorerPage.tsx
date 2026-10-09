@@ -25,9 +25,12 @@ export const MapExplorerPage: React.FC = () => {
     const matchesSearch =
       item.zone.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.zone.zone_id.toLowerCase().includes(searchQuery.toLowerCase());
+    const d = item.latest_decision?.decision;
     const matchesRec =
       recommendationFilter === 'ALL' ||
-      item.latest_decision?.decision === recommendationFilter;
+      d === recommendationFilter ||
+      (recommendationFilter === 'INTERVENTION_RECOMMENDED' && d === 'TARGETED_INTERVENTION_RECOMMENDED') ||
+      (recommendationFilter === 'INTERVENTION_DISCOURAGED' && (d === 'INTERVENTION_DISCOURAGED' || d === 'INTERVENTION_NOT_RECOMMENDED'));
     const matchesConstruction =
       !onlyConstruction || item.zone.nearby_infrastructure.has_construction_nearby;
     return matchesSearch && matchesRec && matchesConstruction;
@@ -73,9 +76,11 @@ export const MapExplorerPage: React.FC = () => {
           className="bg-warm-50 border border-warm-200 rounded-xl px-3 py-1.5 text-xs text-earth-700 focus:outline-none focus:border-accent-400 font-sans"
         >
           <option value="ALL">All Outcomes</option>
-          <option value="INTERVENTION_RECOMMENDED">Recommended</option>
-          <option value="INTERVENTION_NOT_RECOMMENDED">Discouraged</option>
+          <option value="INTERVENTION_RECOMMENDED">Intervention Recommended</option>
+          <option value="TARGETED_INTERVENTION_RECOMMENDED">Targeted Intervention</option>
+          <option value="INTERVENTION_DISCOURAGED">Intervention Discouraged</option>
           <option value="ADVISORY_ONLY">Advisory Only</option>
+          <option value="ALTERNATIVE_DUST_CONTROL_SUGGESTED">Alternative Dust Control</option>
         </select>
 
         <button

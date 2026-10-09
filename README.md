@@ -28,11 +28,14 @@ Instead of indiscriminate deployment, ClearSky Intelligence determines:
 
 ## 2. Key Features
 
-- **Environmental Operations Command Center:** Top 8 KPI metrics, dynamic status indicators (`LIVE DATA`, `CACHED DATA`, `DEMO DATA`), and daily atmospheric synthesis.
-- **Interactive GIS Map Explorer:** Dark OpenStreetMap/CartoDB tiles with 12 Delhi NCR monitoring sectors, color-coded priority markers (Green, Red, Amber, Gray), and click-to-dossier telemetry.
-- **Deep Sector Telemetry Drawer:** Side panel displaying ground station vs numerical model provenance, Haversine station distance, inverse-distance weighting (IDW) interpolation metadata, and full decision rationale.
-- **Water-Efficiency Analytics & Backtesting:** Interactive simulator allowing users to adjust baseline schedules ($0.5\text{--}8.0\text{ runs/day}$) and tanker capacities ($1,000\text{--}15,000\text{ L}$), with instant CSV audit report export.
-- **Transparent Methodology Guide:** Full explainability of all 6 decision rules, threshold triggers, and explicit statements of scientific boundaries.
+- **Environmental Operations Command Center:** Top KPI metrics, dynamic status indicators (`LIVE DATA`, `CACHED DATA`, `DEMO DATA`), and daily atmospheric synthesis.
+- **Interactive GIS Map Explorer:** Dark OpenStreetMap/CartoDB tiles with 12 Delhi NCR monitoring sectors, color-coded priority markers (Sage Green, Warm Red, Amber, Neutral Gray), and click-to-dossier telemetry.
+- **Atmospheric Intelligence Panel:** Deep physics panel computing Dalton evaporation rate ($E_{\text{rate}}$ mm/h), road surface drying time, WMO barometric pressure tendency (3h/6h/12h deltas), and aerodynamic mist drift risk.
+- **Corridor & Road Segment Targeting:** Ranks candidate municipal road corridors from OpenStreetMap with road width, length, surface area, water demand ($0.4\text{ L/m}^2$), and required tanker trips.
+- **Best Time to Spray Planning:** 24-hour hourly weather forecast window ranking identifying optimal atmospheric windows for targeted suppression.
+- **Multi-Scenario Water-Efficiency Audit:** Compares Scheduled vs AQI-Threshold vs ClearSky Targeted vs Alternative Dust Control, calculating saved water, tanker trips, and operational expenditure with instant CSV audit report export.
+- **Empirical Intervention Logging:** Field outcome logging tracking pre- and post-intervention $\Delta\text{PM}_{10}$ against untreated control zones.
+- **Transparent Methodology Guide:** Full explainability of all 9 decision rules, threshold triggers, CPCB AQI breakpoints, and explicit scientific limitations.
 - **Real-Time Data Source Health:** Live monitoring of OpenAQ API v3, Open-Meteo Weather, Open-Meteo Atmospheric Chemistry, NASA FIRMS, and OpenStreetMap Overpass.
 
 ---
@@ -41,11 +44,11 @@ Instead of indiscriminate deployment, ClearSky Intelligence determines:
 
 ### Frontend
 - **Framework:** React 18 with Vite and TypeScript
-- **Styling:** Tailwind CSS with custom midnight-navy & fire-orange palette
+- **Styling:** Custom warm beige, sage green, and terra-cotta design system
 - **Typography:**
-  - **Space Grotesk:** Navigation branding, page titles, section headings, and major KPI figures
-  - **Inter:** Body copy, forms, buttons, descriptions, and data tables
-  - **IBM Plex Mono:** Sensor telemetry, coordinates, timestamps, and technical identifiers
+  - **Sentinel / Clarendon:** Editorial and authoritative headings
+  - **Inter / System Sans:** Clean data tables and forms
+  - **IBM Plex Mono:** Technical metrics, barometric values, coordinates, and timestamps
 - **Mapping:** Leaflet & React-Leaflet with custom SVG pulsating pins
 - **Visualizations:** Recharts (composed bar and line water trajectories)
 - **Icons:** Lucide React
@@ -54,7 +57,7 @@ Instead of indiscriminate deployment, ClearSky Intelligence determines:
 - **Framework:** Python 3.13 / 3.11 with FastAPI and Uvicorn
 - **Validation:** Pydantic V2 schemas and strict typing
 - **Clients:** HTTPX asynchronous HTTP client with timeout budgets
-- **Data & Testing:** NumPy, Pandas, Pytest (29 passing unit & integration tests)
+- **Data & Testing:** NumPy, Pandas, Pytest (37 passing unit & integration tests, 100% pass rate)
 
 ### Storage Abstraction
 - **Local Development:** SQLite (`data/clearsky.db`) with automatic table creation and realistic historical demo seeding (zero AWS credentials required).

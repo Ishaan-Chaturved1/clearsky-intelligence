@@ -30,13 +30,22 @@ from app.schemas.api_models import (
     CitizenReportVerifyRequest,
     CitizenWalletResponse,
     RewardRedeemRequest,
-    RewardRedeemResponse
+    RewardRedeemResponse,
+    AtmosphericAnalysisResponse,
+    CandidateRoadSegmentsResponse,
+    ForecastWindowsResponse,
+    StrategyComparisonResponse,
+    InterventionLogCreateRequest
 )
+from app.models.domain import InterventionOutcomeRecord
 from app.repositories.local_repository import SQLiteRepository
 from app.repositories.dynamodb_repository import DynamoDBRepository
 from app.services.ingestion_service import IngestionService
 from app.analytics.water_efficiency import WaterEfficiencyAnalytics
 from app.services.ai_brief_service import AiBriefService
+from app.services.spatial_service import SpatialService
+from app.services.forecast_service import ForecastService
+from app.services.predictive_model_service import PredictiveModelService
 
 router = APIRouter()
 
@@ -52,6 +61,47 @@ analytics_service = WaterEfficiencyAnalytics(
     default_liters_per_intervention=settings.DEFAULT_ASSUMED_LITERS_PER_INTERVENTION
 )
 ai_brief_service = AiBriefService()
+spatial_service = SpatialService()
+forecast_service = ForecastService()
+predictive_service = PredictiveModelService()
+
+def calculate_indian_aqi(pm10: Optional[float], pm25: Optional[float]) -> int:
+    """
+    Computes Indian National Air Quality Index (CPCB breakpoint formula)
+    for PM10 (24h) and PM2.5 (24h).
+    """
+    def calc_sub_index(conc: Optional[float], breakpoints: list) -> int:
+        if conc is None or conc < 0:
+            return 0
+        for (c_low, c_high, i_low, i_high) in breakpoints:
+            if c_low <= conc <= c_high:
+                return int(round(((i_high - i_low) / (c_high - c_low)) * (conc - c_low) + i_low))
+        if conc > breakpoints[-1][1]:
+            # Extrapolate beyond severe threshold
+            c_low, c_high, i_low, i_high = breakpoints[-1]
+            return min(500, int(round(i_high + (conc - c_high) * 0.5)))
+        return 0
+
+    pm10_bp = [
+        (0, 50, 0, 50),
+        (51, 100, 51, 100),
+        (101, 250, 101, 200),
+        (251, 350, 201, 300),
+        (351, 430, 301, 400),
+        (431, 500, 401, 500),
+    ]
+    pm25_bp = [
+        (0, 30, 0, 50),
+        (31, 60, 51, 100),
+        (61, 90, 101, 200),
+        (91, 120, 201, 300),
+        (121, 250, 301, 400),
+        (251, 380, 401, 500),
+    ]
+
+    sub_pm10 = calc_sub_index(pm10, pm10_bp)
+    sub_pm25 = calc_sub_index(pm25, pm25_bp)
+    return max(sub_pm10, sub_pm25, 25)
 
 @router.get("/health")
 def get_health():
@@ -144,6 +194,214 @@ def get_zone_history(zone_id: str, limit: int = Query(50, ge=1, le=200)):
         "decisions": decisions
     }
 
+@router.get("/zones/{zone_id}/atmospheric-analysis", response_model=AtmosphericAnalysisResponse)
+def get_zone_atmospheric_analysis(zone_id: str):
+    zone = repository.get_zone(zone_id)
+    if not zone:
+        raise HTTPException(status_code=404, detail=f"Zone '{zone_id}' not found")
+
+    reading = repository.get_latest_reading(zone_id)
+    decision = repository.get_latest_decision(zone_id)
+
+    pm10_val = reading.pm10.value if reading and reading.pm10 else None
+    pm25_val = reading.pm25.value if reading and reading.pm25 else None
+    ratio = reading.pm_ratio if reading else None
+    w = reading.weather if reading else None
+
+    # Compute Indian AQI
+    aqi = calculate_indian_aqi(pm10_val, pm25_val)
+
+    # Ratio interpretation
+    if ratio is not None:
+        if ratio >= 2.0:
+            ratio_interp = f"PM10/PM2.5 ratio is {ratio:.2f} >= 2.0. Disproportionate coarse particulate elevation consistent with fugitive mechanical road dust or construction resuspension."
+        else:
+            ratio_interp = f"PM10/PM2.5 ratio is {ratio:.2f} < 2.0. Particulate mass dominated by fine sub-micron aerosols (vehicular combustion soot / industrial secondary aerosols)."
+    else:
+        ratio_interp = "PM ratio unavailable due to incomplete or near-zero PM2.5 measurements."
+
+    # Pressure interpretation
+    press_val = w.surface_pressure_hpa if w else None
+    p_tend = w.pressure_tendency if w else "STEADY"
+    p_3h = w.pressure_trend_3h_hpa if w else None
+    p_6h = w.pressure_trend_6h_hpa if w else None
+    p_12h = w.pressure_trend_12h_hpa if w else None
+
+    if p_tend == "FALLING":
+        press_interp = f"Barometric pressure is falling ({p_3h:+.1f} hPa/3h). May indicate approaching weather trough or localized gustiness. Evaluated as supporting meteorological context."
+    elif p_tend == "RISING":
+        press_interp = f"Barometric pressure is rising ({p_3h:+.1f} hPa/3h). Consistent with building regional anticyclone / subsidence. Evaluated as supporting meteorological context."
+    else:
+        press_interp = "Surface pressure is steady with minor diurnal fluctuations. Supporting meteorological evidence confirms stable barometric conditions."
+
+    # Wind drift assessment
+    ws = w.wind_speed_kmh if w else None
+    if ws is not None:
+        if ws >= 20.0:
+            drift_risk = "PROHIBITIVE: Severe spray drift will carry water droplets away from road target before deposition."
+        elif ws >= 14.0:
+            drift_risk = "MODERATE: Spray cone will experience drift; lower cannon elevation required."
+        else:
+            drift_risk = "LOW: Gentle breeze facilitates direct localized road surface settling."
+    else:
+        drift_risk = "UNKNOWN: Wind speed telemetry unavailable."
+
+    # Freshness
+    now_dt = datetime.now(timezone.utc)
+    freshness_sec = 0
+    if reading and reading.timestamp:
+        try:
+            obs_dt = datetime.fromisoformat(reading.timestamp.replace("Z", "+00:00"))
+            freshness_sec = max(0, int((now_dt - obs_dt).total_seconds()))
+        except Exception:
+            freshness_sec = 1800
+
+    station_dist = (reading.pm10.station_distance_km if reading and reading.pm10 else None) or 4.5
+
+    return AtmosphericAnalysisResponse(
+        zone_id=zone.zone_id,
+        zone_name=zone.name,
+        latitude=zone.latitude,
+        longitude=zone.longitude,
+        timestamp=reading.timestamp if reading else now_dt.isoformat().replace("+00:00", "Z"),
+        aqi_estimate=aqi,
+        aqi_standard="Indian National AQI (CPCB Standard)",
+        pm10_value=pm10_val,
+        pm25_value=pm25_val,
+        pm_ratio=ratio,
+        pm_ratio_interpretation=ratio_interp,
+        temperature_c=w.temperature_c if w else None,
+        relative_humidity=w.relative_humidity if w else None,
+        surface_pressure_hpa=press_val,
+        pressure_trend_3h_hpa=p_3h,
+        pressure_trend_6h_hpa=p_6h,
+        pressure_trend_12h_hpa=p_12h,
+        pressure_tendency=p_tend or "STEADY",
+        pressure_interpretation=press_interp,
+        wind_speed_kmh=ws,
+        wind_direction_deg=w.wind_direction_deg if w else None,
+        wind_drift_risk=drift_risk,
+        precipitation_mmh=w.precipitation_mmh if w else 0.0,
+        rain_suppression_active=(w.precipitation_mmh or 0.0) >= 0.1 if w else False,
+        evaporation_rate_mmh=w.evaporation_rate_mmh if w else None,
+        estimated_surface_drying_time_min=w.estimated_surface_drying_time_min if w else None,
+        boundary_layer_height_m=w.boundary_layer_height_m if w else None,
+        inversion_detected=(w.boundary_layer_height_m or 999) <= 300 if w else False,
+        contributing_stations_count=2 if reading and reading.pm10.data_type == "observed" else 1,
+        nearest_station_distance_km=station_dist,
+        spatial_coverage_rating="GOOD" if station_dist <= 10.0 else "FAIR",
+        data_freshness_seconds=freshness_sec,
+        decision=decision.decision.value if decision else "ADVISORY_ONLY",
+        decision_rationale=decision.reasons if decision else ["Awaiting telemetry."],
+        triggered_rules=decision.triggered_rules if decision else [],
+        conditions_to_change_decision=decision.conditions_to_change if decision else []
+    )
+
+@router.get("/zones/{zone_id}/candidate-segments", response_model=CandidateRoadSegmentsResponse)
+def get_zone_candidate_segments(zone_id: str):
+    zone = repository.get_zone(zone_id)
+    if not zone:
+        raise HTTPException(status_code=404, detail=f"Zone '{zone_id}' not found")
+
+    reading = repository.get_latest_reading(zone_id)
+    pm10 = reading.pm10.value if reading and reading.pm10 else None
+    segments = spatial_service.get_candidate_road_segments(zone, pm10)
+
+    total_water = sum(s.water_required_liters for s in segments)
+    total_trips = sum(s.tanker_trips_required for s in segments)
+
+    return CandidateRoadSegmentsResponse(
+        zone_id=zone.zone_id,
+        zone_name=zone.name,
+        total_segments=len(segments),
+        total_water_required_liters=round(total_water, 0),
+        total_tanker_trips=total_trips,
+        segments=segments
+    )
+
+@router.get("/zones/{zone_id}/forecast-windows", response_model=ForecastWindowsResponse)
+def get_zone_forecast_windows(zone_id: str):
+    zone = repository.get_zone(zone_id)
+    if not zone:
+        raise HTTPException(status_code=404, detail=f"Zone '{zone_id}' not found")
+
+    # Evaluate future operating windows
+    windows = forecast_service.evaluate_hourly_windows(None, zone_id, limit_hours=12)
+    optimal_count = sum(1 for w in windows if w.suitability_label == "OPTIMAL")
+    best_window = windows[0] if windows else None
+
+    return ForecastWindowsResponse(
+        zone_id=zone.zone_id,
+        zone_name=zone.name,
+        forecast_source="Open-Meteo Hourly Numerical Weather Prediction",
+        optimal_windows_count=optimal_count,
+        best_window=best_window,
+        windows=windows,
+        forecasting_disclaimer="Forecast rankings represent weather-suitability for dust-suppression deposition. Future particulate concentrations are not synthetically predicted."
+    )
+
+@router.get("/analytics/strategy-comparison", response_model=StrategyComparisonResponse)
+def get_strategy_comparison(
+    days: int = Query(7, ge=1, le=30),
+    tanker_liters: float = Query(5000.0, ge=1000.0, le=25000.0)
+):
+    zones = repository.list_zones()
+    zone_count = len(zones) if zones else 12
+    scenarios = analytics_service.calculate_strategy_comparison(
+        number_of_zones=zone_count,
+        number_of_days=days,
+        liters_per_tanker=tanker_liters
+    )
+    return StrategyComparisonResponse(
+        number_of_zones=zone_count,
+        reporting_period_days=days,
+        tanker_capacity_liters=tanker_liters,
+        scenarios=scenarios,
+        methodology_summary="Audited comparison between fixed-schedule spraying, generic AQI threshold spraying, ClearSky atmospheric intelligence, and alternative dust-control methods.",
+        audit_notes="Water savings calculations assume treated secondary non-potable effluent. Monetary estimates reflect municipal tanker vehicle trip overheads."
+    )
+
+@router.get("/interventions", response_model=List[InterventionOutcomeRecord])
+def list_logged_interventions(zone_id: Optional[str] = None, limit: int = Query(50, ge=1, le=100)):
+    return predictive_service.list_interventions(zone_id=zone_id, limit=limit)
+
+@router.post("/interventions", response_model=InterventionOutcomeRecord)
+def log_intervention_event(req: InterventionLogCreateRequest):
+    import uuid
+    zone = repository.get_zone(req.zone_id)
+    zone_name = zone.name if zone else "Monitored Sector"
+    reading = repository.get_latest_reading(req.zone_id)
+    weather = reading.weather if reading else WeatherConditions()
+
+    delta = None
+    if req.post_intervention_pm10_1h is not None:
+        delta = round(req.pre_intervention_pm10 - req.post_intervention_pm10_1h, 1)
+
+    record = InterventionOutcomeRecord(
+        intervention_id=f"INT-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}",
+        zone_id=req.zone_id,
+        zone_name=zone_name,
+        road_segment_id=req.road_segment_id,
+        timestamp_start=req.timestamp_start,
+        timestamp_end=req.timestamp_end,
+        water_volume_liters=req.water_volume_liters,
+        tanker_capacity_liters=req.tanker_capacity_liters,
+        method=req.method,
+        pre_intervention_pm10=req.pre_intervention_pm10,
+        post_intervention_pm10_1h=req.post_intervention_pm10_1h,
+        post_intervention_pm10_3h=req.post_intervention_pm10_3h,
+        control_zone_pm10=req.control_zone_pm10,
+        observed_delta_pm10=delta,
+        weather_at_intervention=weather,
+        status="CALIBRATING",
+        notes=req.notes or "Empirical operational record ingested for model calibration."
+    )
+    return predictive_service.log_intervention(record)
+
+@router.get("/interventions/effectiveness-summary")
+def get_intervention_effectiveness_summary():
+    return predictive_service.get_effectiveness_summary()
+
 @router.get("/decisions/latest", response_model=List[DecisionRecord])
 def get_latest_decisions():
     return repository.list_latest_decisions()
@@ -191,7 +449,8 @@ def export_water_savings_csv(
         is_simulation=True,
         data_mode=DataMode.DEMO
     )
-    csv_text = analytics_service.generate_csv_export(analytics)
+    scenarios = analytics_service.calculate_strategy_comparison(zone_count, days, liters_per_op or 5000.0)
+    csv_text = analytics_service.generate_csv_export(analytics, scenarios=scenarios)
     return Response(
         content=csv_text,
         media_type="text/csv",
@@ -320,6 +579,30 @@ def get_methodology():
                 threshold="Mapped construction site <= 300m + elevated PM10",
                 decision_impact="Increases intervention priority (+1) and flags contractor review",
                 scientific_limitation="OSM construction tags indicate ongoing work, not real-time dust emission rates."
+            ),
+            MethodologyRule(
+                rule_id="RULE-07",
+                name="Precipitation & Wet Road Disqualification",
+                rationale="Active rainfall or damp road surfaces naturally suppress mechanical dust resuspension, making water spraying redundant and hazardous.",
+                threshold="Current precipitation >= 0.1 mm/h",
+                decision_impact="INTERVENTION_DISCOURAGED (Safety Gate)",
+                scientific_limitation="Small rain showers may evaporate quickly depending on pavement temperature."
+            ),
+            MethodologyRule(
+                rule_id="RULE-08",
+                name="Surface Evaporation & Rapid Drying Feasibility",
+                rationale="Under extreme heat and low humidity, applied water evaporates in <12 minutes, failing to justify tanker deployment.",
+                threshold="Estimated surface drying time < 12 minutes",
+                decision_impact="ALTERNATIVE_DUST_CONTROL_SUGGESTED (Bio-binders or sweepers)",
+                scientific_limitation="Evaporation rate is estimated via aerodynamic vapor pressure deficit equations."
+            ),
+            MethodologyRule(
+                rule_id="RULE-09",
+                name="Barometric Pressure Trend Context",
+                rationale="Surface barometric pressure and 3h/6h/12h trends indicate synoptic weather evolution (cyclonic troughs vs anticyclonic subsidence).",
+                threshold="Barometric tendency classification (RISING >= +1.5 hPa/3h, FALLING <= -1.5 hPa/3h)",
+                decision_impact="Supporting meteorological evidence; not a standalone trigger for spraying",
+                scientific_limitation="Pressure change correlates with regional airmass movement but is not a direct measure of particulate mass."
             )
         ],
         confidence_calculation=(
