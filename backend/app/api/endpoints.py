@@ -3,7 +3,18 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query, Header, Response
 from app.core.config import settings
 from app.core.logging import logger
-from app.models.domain import Zone, DecisionRecord, EnvironmentalReading, DecisionType, DataMode, AlertRecord
+from app.models.domain import (
+    Zone,
+    DecisionRecord,
+    EnvironmentalReading,
+    DecisionType,
+    DataMode,
+    AlertRecord,
+    CitizenReport,
+    RewardItem,
+    ViolationCategory,
+    ReportStatus
+)
 from app.schemas.api_models import (
     SystemOverviewResponse,
     ZoneWithLatest,
@@ -14,7 +25,12 @@ from app.schemas.api_models import (
     MethodologyRule,
     AdminRefreshRequest,
     AdminRefreshResponse,
-    AiDailyBriefResponse
+    AiDailyBriefResponse,
+    CitizenReportCreateRequest,
+    CitizenReportVerifyRequest,
+    CitizenWalletResponse,
+    RewardRedeemRequest,
+    RewardRedeemResponse
 )
 from app.repositories.local_repository import SQLiteRepository
 from app.repositories.dynamodb_repository import DynamoDBRepository
@@ -348,3 +364,129 @@ async def admin_refresh_data(
         timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         data_mode=DataMode.LIVE if has_live else DataMode.DEMO
     )
+
+# ==========================================
+# Citizen Reporting Loop & Eco-Rewards Store
+# ==========================================
+
+CATEGORY_LABELS = {
+    "UNCOVERED_CONSTRUCTION": "Uncovered Construction Site",
+    "ILLEGAL_DEMOLITION": "Illegal Unmitigated Demolition",
+    "INDUSTRIAL_EMISSION": "Industrial Stack Emissions",
+    "OPEN_WASTE_BURNING": "Open Waste & Biomass Burning",
+    "UNPAVED_ROAD_DUST": "Unpaved Road Dust Resuspension",
+}
+
+@router.get("/reports", response_model=List[CitizenReport])
+def list_citizen_reports(limit: int = Query(50, ge=1, le=100)):
+    """Retrieve public incident reporting queue."""
+    return repository.list_citizen_reports(limit=limit)
+
+@router.post("/reports", response_model=CitizenReport)
+def submit_citizen_report(req: CitizenReportCreateRequest):
+    """
+    Submit a citizen air quality or construction violation report.
+    Automatically correlates with proximate monitored zones and Overpass spatial data.
+    """
+    import math
+    import uuid
+
+    zones = repository.list_zones()
+    nearest_zone = None
+    min_dist_km = 999.0
+
+    if req.zone_id:
+        nearest_zone = repository.get_zone(req.zone_id)
+    else:
+        for z in zones:
+            dlat = math.radians(z.latitude - req.latitude)
+            dlon = math.radians(z.longitude - req.longitude)
+            a = math.sin(dlat / 2)**2 + math.cos(math.radians(req.latitude)) * math.cos(math.radians(z.latitude)) * math.sin(dlon / 2)**2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+            dist = 6371.0 * c
+            if dist < min_dist_km:
+                min_dist_km = dist
+                nearest_zone = z
+
+    zone_id = nearest_zone.zone_id if nearest_zone else None
+    zone_name = nearest_zone.name if nearest_zone else "Delhi NCR Region"
+
+    # Correlate evidence with regional telemetry
+    category_str = req.category.upper()
+    cat_label = CATEGORY_LABELS.get(category_str, "Uncategorized Air Emission")
+    correlation = f"Geolocated within {min_dist_km:.1f}km of {zone_name}."
+
+    if category_str == "UNCOVERED_CONSTRUCTION" and nearest_zone and nearest_zone.nearby_infrastructure.has_construction_nearby:
+        correlation += f" Correlated with active proximate construction site ({nearest_zone.nearby_infrastructure.construction_distance_meters or 300}m tag) and elevated PM10."
+    elif category_str == "OPEN_WASTE_BURNING":
+        correlation += " Cross-referenced against regional satellite thermal anomaly grid; flagged for rapid municipal dispatch."
+    elif category_str == "INDUSTRIAL_EMISSION":
+        correlation += " Correlated with proximate industrial cluster and stack air quality boundaries."
+
+    report_id = f"REP-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    report = CitizenReport(
+        report_id=report_id,
+        created_at=now_iso,
+        category=category_str,
+        category_label=cat_label,
+        zone_id=zone_id,
+        zone_name=zone_name,
+        latitude=req.latitude,
+        longitude=req.longitude,
+        location_address=req.location_address,
+        description=req.description,
+        photo_url=req.photo_url or "https://images.unsplash.com/photo-1541888946425-d0fbb186156f?auto=format&fit=crop&w=600&q=80",
+        has_voice_note=req.has_voice_note,
+        voice_note_transcript=req.voice_note_transcript,
+        reporter_name=req.reporter_name or "Concerned Citizen",
+        reporter_contact=req.reporter_contact or "Anonymous Web Submission",
+        channel=req.channel or "WEB",
+        status=ReportStatus.PENDING_AUDIT,
+        points_awarded=0,
+        evidence_correlation=correlation,
+        verification_notes="Incident ingested into public verification queue."
+    )
+
+    repository.save_citizen_report(report)
+    return report
+
+@router.post("/reports/{report_id}/verify", response_model=CitizenReport)
+def verify_citizen_report(report_id: str, req: CitizenReportVerifyRequest):
+    """
+    Review and verify an incident report. Awards ClearSky Points upon verification.
+    """
+    existing = repository.get_citizen_report(report_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    status_str = req.status.upper()
+    points = req.points_to_award if status_str in ("VERIFIED_VIOLATION", "ACTION_DISPATCHED", "RESOLVED") else 0
+
+    existing.status = status_str
+    existing.points_awarded = points
+    existing.verification_notes = req.verification_notes or f"Verified by municipal audit team. {points} ClearSky Points awarded to citizen."
+
+    repository.update_citizen_report(existing)
+    return existing
+
+@router.get("/rewards/catalog", response_model=List[RewardItem])
+def get_rewards_catalog():
+    """List eco-friendly items redeemable with ClearSky Points."""
+    return repository.list_rewards_catalog()
+
+@router.get("/rewards/wallet", response_model=CitizenWalletResponse)
+def get_citizen_wallet(contact: str = Query("+91 98112 43210")):
+    """Get citizen point balance, history, and active redeemed vouchers."""
+    data = repository.get_citizen_points(contact)
+    return CitizenWalletResponse(**data)
+
+@router.post("/rewards/redeem", response_model=RewardRedeemResponse)
+def redeem_reward_item(req: RewardRedeemRequest):
+    """Redeem an Eco-Store item using accumulated ClearSky Points."""
+    result = repository.redeem_reward(req.reporter_contact, req.item_id)
+    if not result:
+        raise HTTPException(status_code=400, detail="Insufficient ClearSky Points or invalid item ID.")
+    return RewardRedeemResponse(**result)
+

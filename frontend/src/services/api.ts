@@ -6,7 +6,11 @@ import {
   SourcesStatus,
   MethodologyResponse,
   AiDailyBrief,
-  AlertRecord
+  AlertRecord,
+  CitizenReport,
+  RewardItem,
+  CitizenWallet,
+  CitizenReportCreateInput
 } from '../types';
 
 const API_BASE = '/api';
@@ -72,5 +76,50 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ admin_key: adminKey, force_mock: forceMock })
       }
-    )
+    ),
+
+  // Citizen Reporting Loop & Eco-Rewards
+  getCitizenReports: (limit = 50) =>
+    fetchJson<CitizenReport[]>(`${API_BASE}/reports?limit=${limit}`),
+
+  submitCitizenReport: (data: CitizenReportCreateInput) =>
+    fetchJson<CitizenReport>(`${API_BASE}/reports`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }),
+
+  verifyCitizenReport: (reportId: string, status: string, points = 100, notes?: string) =>
+    fetchJson<CitizenReport>(`${API_BASE}/reports/${reportId}/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status,
+        points_to_award: points,
+        verification_notes: notes
+      })
+    }),
+
+  getRewardsCatalog: () =>
+    fetchJson<RewardItem[]>(`${API_BASE}/rewards/catalog`),
+
+  getCitizenWallet: (contact = '+91 98112 43210') =>
+    fetchJson<CitizenWallet>(`${API_BASE}/rewards/wallet?contact=${encodeURIComponent(contact)}`),
+
+  redeemRewardItem: (contact: string, itemId: string) =>
+    fetchJson<{
+      success: boolean;
+      voucher_code: string;
+      item_title: string;
+      points_spent: number;
+      remaining_points: number;
+      instructions: string;
+    }>(`${API_BASE}/rewards/redeem`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reporter_contact: contact,
+        item_id: itemId
+      })
+    })
 };

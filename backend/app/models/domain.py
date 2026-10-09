@@ -90,3 +90,49 @@ class AlertRecord(BaseModel):
     decision: DecisionType
     priority: Optional[int] = None
     created_at: str
+
+class ViolationCategory(str, Enum):
+    UNCOVERED_CONSTRUCTION = "UNCOVERED_CONSTRUCTION"
+    ILLEGAL_DEMOLITION = "ILLEGAL_DEMOLITION"
+    INDUSTRIAL_EMISSION = "INDUSTRIAL_EMISSION"
+    OPEN_WASTE_BURNING = "OPEN_WASTE_BURNING"
+    UNPAVED_ROAD_DUST = "UNPAVED_ROAD_DUST"
+
+class ReportStatus(str, Enum):
+    PENDING_AUDIT = "PENDING_AUDIT"
+    VERIFIED_VIOLATION = "VERIFIED_VIOLATION"
+    ACTION_DISPATCHED = "ACTION_DISPATCHED"
+    REJECTED = "REJECTED"
+    RESOLVED = "RESOLVED"
+
+class CitizenReport(BaseModel):
+    report_id: str
+    created_at: str
+    category: ViolationCategory
+    category_label: str
+    zone_id: Optional[str] = None
+    zone_name: Optional[str] = None
+    latitude: float
+    longitude: float
+    location_address: str
+    description: str
+    photo_url: Optional[str] = None
+    has_voice_note: bool = False
+    voice_note_transcript: Optional[str] = None
+    reporter_name: str
+    reporter_contact: str
+    channel: str = "WEB"  # "WEB", "WHATSAPP", "TELEGRAM", "EMAIL"
+    status: ReportStatus = ReportStatus.PENDING_AUDIT
+    points_awarded: int = 0
+    evidence_correlation: Optional[str] = None
+    verification_notes: Optional[str] = None
+
+class RewardItem(BaseModel):
+    item_id: str
+    title: str
+    category: str
+    points_cost: int
+    description: str
+    sponsor: str
+    in_stock: bool = True
+    badge_label: Optional[str] = None

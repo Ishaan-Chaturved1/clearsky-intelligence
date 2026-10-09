@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Wind, Droplets, ShieldCheck, MapPin, Sparkles, Activity, Layers } from 'lucide-react';
+import { ArrowRight, Wind, Droplets, ShieldCheck, MapPin, Sparkles, Activity, Layers, ShieldAlert } from 'lucide-react';
 import { api } from '../services/api';
 import { SystemOverview } from '../types';
 
@@ -34,6 +34,13 @@ export const LandingPage: React.FC = () => {
         </div>
 
         <nav className="flex items-center gap-6">
+          <Link
+            to="/citizen-watch"
+            className="hidden sm:inline-flex items-center gap-1.5 font-sans text-xs font-semibold text-accent-600 hover:text-accent-700 transition-colors"
+          >
+            <ShieldAlert className="w-3.5 h-3.5" />
+            <span>Citizen Watch</span>
+          </Link>
           <Link
             to="/methodology"
             className="hidden sm:inline-block font-sans text-xs font-medium text-earth-600 hover:text-earth-900 transition-colors"
@@ -96,6 +103,14 @@ export const LandingPage: React.FC = () => {
           >
             <MapPin className="w-4 h-4 text-accent-500" />
             <span>Interactive NCR Map</span>
+          </Link>
+
+          <Link
+            to="/citizen-watch"
+            className="flex items-center justify-center gap-2 w-full sm:w-auto px-8 py-4 rounded-2xl bg-white hover:bg-warm-100 text-earth-800 font-sans font-medium text-base border border-warm-300 shadow-warm-sm hover:shadow-warm transition-all duration-300"
+          >
+            <ShieldAlert className="w-4 h-4 text-accent-500" />
+            <span>Citizen Watch &amp; Eco-Points</span>
           </Link>
         </div>
 

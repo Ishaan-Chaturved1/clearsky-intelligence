@@ -9,6 +9,7 @@ import { WaterAnalyticsPage } from './pages/WaterAnalyticsPage';
 import { MethodologyPage } from './pages/MethodologyPage';
 import { DataSourcesPage } from './pages/DataSourcesPage';
 import { AboutPage } from './pages/AboutPage';
+import { CitizenWatchPage } from './pages/CitizenWatchPage';
 import { api } from './services/api';
 import { DataMode } from './types';
 
@@ -59,6 +60,7 @@ const AppLayout: React.FC = () => {
           <Route path="/" element={<LandingPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/map" element={<MapExplorerPage />} />
+          <Route path="/citizen-watch" element={<CitizenWatchPage />} />
           <Route path="/water-analytics" element={<WaterAnalyticsPage />} />
           <Route path="/methodology" element={<MethodologyPage />} />
           <Route path="/data-sources" element={<DataSourcesPage />} />

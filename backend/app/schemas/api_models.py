@@ -87,3 +87,43 @@ class AiDailyBriefResponse(BaseModel):
     high_priority_zones: List[str]
     cautions_and_disclaimers: List[str]
     provider: str  # 'Amazon Bedrock' or 'Deterministic Fallback'
+
+class CitizenReportCreateRequest(BaseModel):
+    category: str
+    zone_id: Optional[str] = None
+    latitude: float
+    longitude: float
+    location_address: str
+    description: str
+    photo_url: Optional[str] = None
+    has_voice_note: bool = False
+    voice_note_transcript: Optional[str] = None
+    reporter_name: str = "Citizen Reporter"
+    reporter_contact: str = ""
+    channel: str = "WEB"
+
+class CitizenReportVerifyRequest(BaseModel):
+    status: str
+    points_to_award: int = 100
+    verification_notes: Optional[str] = None
+    admin_key: Optional[str] = None
+
+class CitizenWalletResponse(BaseModel):
+    reporter_contact: str
+    reporter_name: str
+    total_points: int
+    verified_reports_count: int
+    reports: List[Dict[str, Any]]
+    redeemed_vouchers: List[Dict[str, Any]] = Field(default_factory=list)
+
+class RewardRedeemRequest(BaseModel):
+    reporter_contact: str
+    item_id: str
+
+class RewardRedeemResponse(BaseModel):
+    success: bool
+    voucher_code: str
+    item_title: str
+    points_spent: int
+    remaining_points: int
+    instructions: str

@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { RefreshCw, BarChart3, Map, HelpCircle, Database, Info, Layers } from 'lucide-react';
+import { RefreshCw, BarChart3, Map, HelpCircle, Database, Info, Layers, ShieldAlert } from 'lucide-react';
 import { DataMode } from '../types';
 import { getDataModeBadge } from '../utils/formatters';
 
@@ -20,6 +20,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const navItems = [
     { to: '/dashboard', label: 'Dashboard', icon: Layers },
     { to: '/map', label: 'Map', icon: Map },
+    { to: '/citizen-watch', label: 'Citizen Watch', icon: ShieldAlert },
     { to: '/water-analytics', label: 'Water', icon: BarChart3 },
     { to: '/methodology', label: 'Methodology', icon: HelpCircle },
     { to: '/data-sources', label: 'Sources', icon: Database },

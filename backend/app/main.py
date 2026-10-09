@@ -1,9 +1,15 @@
 import os
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.core.config import settings
+from app.core.config import settings, BASE_DIR
+
+# Ensure project root is in sys.path
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 from app.core.logging import logger
 from app.api.endpoints import router as api_router
 from app.repositories.local_repository import SQLiteRepository

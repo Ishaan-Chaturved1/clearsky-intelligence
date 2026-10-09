@@ -186,3 +186,84 @@ export interface AiDailyBrief {
   cautions_and_disclaimers: string[];
   provider: string;
 }
+
+export type ViolationCategory =
+  | 'UNCOVERED_CONSTRUCTION'
+  | 'ILLEGAL_DEMOLITION'
+  | 'INDUSTRIAL_EMISSION'
+  | 'OPEN_WASTE_BURNING'
+  | 'UNPAVED_ROAD_DUST';
+
+export type ReportStatus =
+  | 'PENDING_AUDIT'
+  | 'VERIFIED_VIOLATION'
+  | 'ACTION_DISPATCHED'
+  | 'RESOLVED'
+  | 'REJECTED';
+
+export interface CitizenReport {
+  report_id: string;
+  created_at: string;
+  category: ViolationCategory;
+  category_label: string;
+  zone_id?: string | null;
+  zone_name?: string | null;
+  latitude: number;
+  longitude: number;
+  location_address: string;
+  description: string;
+  photo_url?: string | null;
+  has_voice_note: boolean;
+  voice_note_transcript?: string | null;
+  reporter_name: string;
+  reporter_contact: string;
+  channel: 'WEB' | 'WHATSAPP' | 'TELEGRAM' | 'EMAIL';
+  status: ReportStatus;
+  points_awarded: number;
+  evidence_correlation?: string | null;
+  verification_notes?: string | null;
+}
+
+export interface RewardItem {
+  item_id: string;
+  title: string;
+  category: string;
+  points_cost: number;
+  description: string;
+  sponsor: string;
+  in_stock: boolean;
+  badge_label?: string | null;
+}
+
+export interface CitizenWallet {
+  reporter_contact: string;
+  reporter_name: string;
+  total_points: number;
+  lifetime_points: number;
+  verified_reports_count: number;
+  reports: CitizenReport[];
+  redeemed_vouchers: Array<{
+    redemption_id: string;
+    contact: string;
+    item_id: string;
+    voucher_code: string;
+    redeemed_at: string;
+    points_spent: number;
+  }>;
+}
+
+export interface CitizenReportCreateInput {
+  category: string;
+  zone_id?: string;
+  latitude: number;
+  longitude: number;
+  location_address: string;
+  description: string;
+  photo_url?: string;
+  has_voice_note?: boolean;
+  voice_note_transcript?: string;
+  reporter_name?: string;
+  reporter_contact?: string;
+  channel?: string;
+}
+

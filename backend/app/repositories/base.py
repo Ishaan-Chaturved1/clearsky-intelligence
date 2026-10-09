@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List, Optional, Any
 from app.models.domain import Zone, EnvironmentalReading, DecisionRecord, AlertRecord
 
 class BaseRepository(ABC):
@@ -58,3 +58,34 @@ class BaseRepository(ABC):
     @abstractmethod
     def list_recent_alerts(self, limit: int = 20) -> List[AlertRecord]:
         pass
+
+    # Citizen Reports
+    @abstractmethod
+    def save_citizen_report(self, report: Any) -> None:
+        pass
+
+    @abstractmethod
+    def get_citizen_report(self, report_id: str) -> Optional[Any]:
+        pass
+
+    @abstractmethod
+    def list_citizen_reports(self, limit: int = 50) -> List[Any]:
+        pass
+
+    @abstractmethod
+    def update_citizen_report(self, report: Any) -> None:
+        pass
+
+    # Rewards
+    @abstractmethod
+    def list_rewards_catalog(self) -> List[Any]:
+        pass
+
+    @abstractmethod
+    def get_citizen_points(self, contact: str) -> Any:
+        pass
+
+    @abstractmethod
+    def redeem_reward(self, contact: str, item_id: str) -> Optional[Any]:
+        pass
+
