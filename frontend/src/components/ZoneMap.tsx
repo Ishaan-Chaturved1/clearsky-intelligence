@@ -76,7 +76,7 @@ export const ZoneMap: React.FC<ZoneMapProps> = ({
     : undefined;
 
   return (
-    <div className="relative rounded-2xl overflow-hidden border border-warm-200 bg-warm-100 shadow-warm">
+    <div className="relative isolate z-0 rounded-2xl overflow-hidden border border-warm-200 bg-warm-100 shadow-warm">
       
       {/* Map Legend Header Overlay */}
       <div className="absolute top-3 left-3 z-[1000] flex flex-wrap items-center gap-2">

@@ -67,7 +67,15 @@ export const ZoneDetailDrawer: React.FC<ZoneDetailDrawerProps> = ({ item, onClos
   const confidenceInfo = getConfidenceBadgeInfo(latest_decision?.confidence);
 
   return (
-    <div className="fixed inset-y-0 right-0 z-50 w-full max-w-2xl bg-warm-50 border-l border-warm-200 shadow-warm-xl flex flex-col overflow-hidden">
+    <>
+      {/* Dimmed backdrop to close drawer and prevent background map interaction */}
+      <div
+        className="fixed inset-0 bg-earth-900/40 backdrop-blur-xs z-[1999] transition-opacity"
+        onClick={onClose}
+      />
+
+      {/* Drawer Panel */}
+      <div className="fixed inset-y-0 right-0 z-[2000] w-full max-w-2xl bg-warm-50 border-l border-warm-200 shadow-2xl flex flex-col overflow-hidden">
       
       {/* Header */}
       <div className="p-5 border-b border-warm-200 bg-white flex items-start justify-between gap-3">
@@ -564,5 +572,6 @@ export const ZoneDetailDrawer: React.FC<ZoneDetailDrawerProps> = ({ item, onClos
       </div>
 
     </div>
+    </>
   );
 };
