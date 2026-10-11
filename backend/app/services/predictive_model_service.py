@@ -19,63 +19,44 @@ class PredictiveModelService:
     def __init__(self):
         # In-memory storage for logged intervention outcomes (can be backed by SQLite/DynamoDB)
         self._interventions: List[InterventionOutcomeRecord] = []
-        self._seed_default_calibration_data()
+        self._load_calibration_data()
 
-    def _seed_default_calibration_data(self):
-        """Seed transparent initial field calibration records."""
-        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        self._interventions.append(
-            InterventionOutcomeRecord(
-                intervention_id="INT-202610-01",
-                zone_id="DEL-AV-01",
-                zone_name="Anand Vihar ISBT Corridor",
-                road_segment_id="SEG-DEL-AV-01-01",
-                timestamp_start="2026-10-08T06:00:00Z",
-                timestamp_end="2026-10-08T06:45:00Z",
-                water_volume_liters=6500.0,
-                tanker_capacity_liters=5000.0,
-                method="MIST_CANNON",
-                pre_intervention_pm10=320.0,
-                post_intervention_pm10_1h=275.0,
-                post_intervention_pm10_3h=290.0,
-                control_zone_pm10=310.0,
-                observed_delta_pm10=45.0,
-                weather_at_intervention=WeatherConditions(
-                    temperature_c=26.5,
-                    relative_humidity=52.0,
-                    wind_speed_kmh=6.2,
-                    surface_pressure_hpa=1013.5
-                ),
-                status="CALIBRATING",
-                notes="Targeted perimeter misting along flyover construction zone. Immediate 1h suppression observed before ambient traffic re-entrainment."
-            )
-        )
-        self._interventions.append(
-            InterventionOutcomeRecord(
-                intervention_id="INT-202610-02",
-                zone_id="DEL-WZ-05",
-                zone_name="Wazirpur Industrial Area",
-                road_segment_id="SEG-DEL-WZ-05-01",
-                timestamp_start="2026-10-08T07:15:00Z",
-                timestamp_end="2026-10-08T08:00:00Z",
-                water_volume_liters=5000.0,
-                tanker_capacity_liters=5000.0,
-                method="ROAD_WETTING",
-                pre_intervention_pm10=260.0,
-                post_intervention_pm10_1h=230.0,
-                post_intervention_pm10_3h=248.0,
-                control_zone_pm10=255.0,
-                observed_delta_pm10=30.0,
-                weather_at_intervention=WeatherConditions(
-                    temperature_c=27.8,
-                    relative_humidity=48.0,
-                    wind_speed_kmh=8.1,
-                    surface_pressure_hpa=1012.8
-                ),
-                status="CALIBRATING",
-                notes="Road wetting along industrial perimeter. Rapid surface drying (~35m) observed."
-            )
-        )
+    def _load_calibration_data(self):
+        """Load field calibration records dynamically from data/calibration.json."""
+        from pathlib import Path
+        import json
+        from app.core.config import BASE_DIR
+        
+        cal_path = BASE_DIR / "data" / "calibration.json"
+        if cal_path.exists():
+            try:
+                with open(cal_path, "r", encoding="utf-8") as f:
+                    raw_records = json.load(f)
+                for r in raw_records:
+                    weather = WeatherConditions(**r.get("weather_at_intervention", {})) if r.get("weather_at_intervention") else None
+                    record = InterventionOutcomeRecord(
+                        intervention_id=r["intervention_id"],
+                        zone_id=r["zone_id"],
+                        zone_name=r["zone_name"],
+                        road_segment_id=r.get("road_segment_id"),
+                        timestamp_start=r["timestamp_start"],
+                        timestamp_end=r["timestamp_end"],
+                        water_volume_liters=r["water_volume_liters"],
+                        tanker_capacity_liters=r.get("tanker_capacity_liters", 5000.0),
+                        method=r.get("method", "MIST_CANNON"),
+                        pre_intervention_pm10=r["pre_intervention_pm10"],
+                        post_intervention_pm10_1h=r.get("post_intervention_pm10_1h"),
+                        post_intervention_pm10_3h=r.get("post_intervention_pm10_3h"),
+                        control_zone_pm10=r.get("control_zone_pm10"),
+                        observed_delta_pm10=r.get("observed_delta_pm10"),
+                        weather_at_intervention=weather,
+                        status=r.get("status", "CALIBRATING"),
+                        notes=r.get("notes")
+                    )
+                    self._interventions.append(record)
+                return
+            except Exception as e:
+                logger.warning(f"Failed to load calibration data from JSON: {e}")
 
     def log_intervention(self, record: InterventionOutcomeRecord) -> InterventionOutcomeRecord:
         """Logs an intervention event with empirical pre/post observations."""

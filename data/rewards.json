@@ -1,0 +1,52 @@
+[
+  {
+    "item_id": "HEPA-ROOM-01",
+    "title": "Certified True HEPA Air Purifier Filter Replacement",
+    "category": "Air Purification",
+    "points_cost": 250,
+    "description": "High-efficiency particulate arrestor capturing 99.97% of fine PM2.5. Compatible with top home purifiers.",
+    "sponsor": "Delhi Clean Air Partner Network",
+    "in_stock": true,
+    "badge_label": "Popular"
+  },
+  {
+    "item_id": "N95-PACK-10",
+    "title": "Certified N95 Anti-Pollution Masks (Pack of 10)",
+    "category": "Health & Protection",
+    "points_cost": 80,
+    "description": "Surgical-grade particulate filtering respirator masks for high-smog commutes.",
+    "sponsor": "ClearSky Public Health Fund",
+    "in_stock": true,
+    "badge_label": "Essential"
+  },
+  {
+    "item_id": "INDOOR-PLANT-03",
+    "title": "Air-Purifying Green Plant (Areca Palm / Sansevieria)",
+    "category": "Green Living",
+    "points_cost": 120,
+    "description": "NASA Clean Air Study certified natural particulate and VOC absorbing potted indoor plant.",
+    "sponsor": "Urban Forest Initiative NCR",
+    "in_stock": true,
+    "badge_label": "Eco Living"
+  },
+  {
+    "item_id": "PM25-SENSOR-MINI",
+    "title": "Pocket Laser PM2.5 Micro-Sensor Device",
+    "category": "Sensors",
+    "points_cost": 500,
+    "description": "Compact optical particle counter syncing real-time micro-climate readings via Bluetooth.",
+    "sponsor": "Quantified Minds Hardware Lab",
+    "in_stock": true,
+    "badge_label": "Tech Gear"
+  },
+  {
+    "item_id": "METRO-ECO-PASS",
+    "title": "Delhi Metro Green Commute Pass (₹500 Recharge)",
+    "category": "Transit",
+    "points_cost": 200,
+    "description": "Preloaded smart mobility transit card promoting zero-tailpipe public metro transit across Delhi NCR.",
+    "sponsor": "DMRC Sustainable Transit Alliance",
+    "in_stock": true,
+    "badge_label": "Commute"
+  }
+]

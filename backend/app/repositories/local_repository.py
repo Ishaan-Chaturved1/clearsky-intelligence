@@ -152,119 +152,74 @@ class SQLiteRepository(BaseRepository):
             # Seed default rewards catalog if empty
             cursor.execute("SELECT COUNT(*) as count FROM rewards_catalog")
             if cursor.fetchone()["count"] == 0:
-                rewards_data = [
-                    ("HEPA-ROOM-01", "Certified True HEPA Air Purifier Filter Replacement", "Air Purification", 250, "High-efficiency particulate arrestor capturing 99.97% of fine PM2.5. Compatible with top home purifiers.", "Delhi Clean Air Partner Network", 1, "Popular"),
-                    ("N95-PACK-10", "Certified N95 Anti-Pollution Masks (Pack of 10)", "Health & Protection", 80, "Surgical-grade particulate filtering respirator masks for high-smog commutes.", "ClearSky Public Health Fund", 1, "Essential"),
-                    ("INDOOR-PLANT-03", "Air-Purifying Green Plant (Areca Palm / Sansevieria)", "Green Living", 120, "NASA Clean Air Study certified natural particulate and VOC absorbing potted indoor plant.", "Urban Forest Initiative NCR", 1, "Eco Living"),
-                    ("PM25-SENSOR-MINI", "Pocket Laser PM2.5 Micro-Sensor Device", "Sensors", 500, "Compact optical particle counter syncing real-time micro-climate readings via Bluetooth.", "Quantified Minds Hardware Lab", 1, "Tech Gear"),
-                    ("METRO-ECO-PASS", "Delhi Metro Green Commute Pass (₹500 Recharge)", "Transit", 200, "Preloaded smart mobility transit card promoting zero-tailpipe public metro transit across Delhi NCR.", "DMRC Sustainable Transit Alliance", 1, "Commute")
-                ]
-                cursor.executemany("""
-                    INSERT INTO rewards_catalog (item_id, title, category, points_cost, description, sponsor, in_stock, badge_label)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, rewards_data)
+                rewards_json_path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "rewards.json"
+                if rewards_json_path.exists():
+                    try:
+                        with open(rewards_json_path, "r", encoding="utf-8") as f:
+                            rewards_items = json.load(f)
+                        rewards_tuples = [
+                            (
+                                item["item_id"],
+                                item["title"],
+                                item["category"],
+                                item["points_cost"],
+                                item["description"],
+                                item["sponsor"],
+                                1 if item.get("in_stock", True) else 0,
+                                item.get("badge_label", "")
+                            )
+                            for item in rewards_items
+                        ]
+                        cursor.executemany("""
+                            INSERT INTO rewards_catalog (item_id, title, category, points_cost, description, sponsor, in_stock, badge_label)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """, rewards_tuples)
+                    except Exception as e:
+                        logger.warning(f"Failed to seed rewards from JSON: {e}")
 
             # Seed demo citizen reports if empty
             cursor.execute("SELECT COUNT(*) as count FROM citizen_reports")
             if cursor.fetchone()["count"] == 0:
-                demo_reports = [
-                    (
-                        "REP-2026-101",
-                        "2026-10-09T08:15:00Z",
-                        "UNCOVERED_CONSTRUCTION",
-                        "Uncovered Construction Site",
-                        "DL-01",
-                        "Anand Vihar",
-                        28.647,
-                        77.315,
-                        "Main Flyover Pillar Site, Anand Vihar Corridor",
-                        "Massive dry excavation piles left completely uncovered. Heavy wind blowing particulate plumes across pedestrian footpaths without required water spraying.",
-                        "https://images.unsplash.com/photo-1541888946425-d0fbb186156f?auto=format&fit=crop&w=600&q=80",
-                        1,
-                        "Voice Note (28s): 'Huge dust clouds blowing across the road from uncovered flyover work...'",
-                        "Vikram Sharma",
-                        "+91 98112 43210",
-                        "WHATSAPP",
-                        "VERIFIED_VIOLATION",
-                        100,
-                        "Correlated with proximate 180m Overpass construction site tag and Anand Vihar PM10 surge (385 µg/m³).",
-                        "Notice served to site contractor. 100 ClearSky Points awarded to citizen."
-                    ),
-                    (
-                        "REP-2026-102",
-                        "2026-10-09T07:40:00Z",
-                        "INDUSTRIAL_EMISSION",
-                        "Industrial Stack Emissions",
-                        "DL-03",
-                        "Wazirpur Industrial Area",
-                        28.699,
-                        77.165,
-                        "Block C Metallurgical Foundry, Wazirpur",
-                        "Dense black smoke billowing from furnace chimney without electrostatic precipitator scrubber. Strong burning sulfur odor.",
-                        "https://images.unsplash.com/photo-1611273426858-450d8e3c9fce?auto=format&fit=crop&w=600&q=80",
-                        0,
-                        None,
-                        "Pooja Malhotra",
-                        "+91 98710 99823",
-                        "TELEGRAM",
-                        "ACTION_DISPATCHED",
-                        150,
-                        "Correlated with industrial zone cluster; DPCC mobile compliance team dispatched.",
-                        "Audit team verified violation. 150 ClearSky Points credited."
-                    ),
-                    (
-                        "REP-2026-103",
-                        "2026-10-09T06:20:00Z",
-                        "OPEN_WASTE_BURNING",
-                        "Open Waste & Biomass Burning",
-                        "DL-09",
-                        "Mundka Industrial Area",
-                        28.683,
-                        77.031,
-                        "Outer Ring Road vacant plot near Mundka Metro Depot",
-                        "Illegal municipal solid waste and rubber scrap burning near perimeter boundary. Acrid smoke spreading toward residential colony.",
-                        "https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=600&q=80",
-                        1,
-                        "Voice Note (15s): 'Someone set fire to garbage heaps behind the boundary wall...'",
-                        "Arjun Verma",
-                        "+91 99580 12345",
-                        "EMAIL",
-                        "RESOLVED",
-                        100,
-                        "Correlated with NASA FIRMS active thermal anomaly detection; fire patrol extinguished site.",
-                        "Hazard mitigated within 45 minutes. 100 ClearSky Points credited."
-                    ),
-                    (
-                        "REP-2026-104",
-                        "2026-10-09T09:05:00Z",
-                        "UNPAVED_ROAD_DUST",
-                        "Unpaved Road Dust Resuspension",
-                        "DL-06",
-                        "Punjabi Bagh",
-                        28.669,
-                        77.126,
-                        "Rohtak Road Diversion Service Lane, Punjabi Bagh West",
-                        "Heavy commercial multi-axle trucks stirring dense dust clouds along dry unpaved service lane lacking any mechanical sweeping or dust binding.",
-                        "https://images.unsplash.com/photo-1578632767115-351597cf2477?auto=format&fit=crop&w=600&q=80",
-                        0,
-                        None,
-                        "Sunita Roy",
-                        "+91 98101 55432",
-                        "WEB",
-                        "PENDING_AUDIT",
-                        0,
-                        "Awaiting secondary satellite and ground patrol confirmation.",
-                        "Queued for automated review."
-                    )
-                ]
-                cursor.executemany("""
-                    INSERT INTO citizen_reports (
-                        report_id, created_at, category, category_label, zone_id, zone_name,
-                        latitude, longitude, location_address, description, photo_url,
-                        has_voice_note, voice_note_transcript, reporter_name, reporter_contact,
-                        channel, status, points_awarded, evidence_correlation, verification_notes
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, demo_reports)
+                reports_json_path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "citizen_reports.json"
+                if reports_json_path.exists():
+                    try:
+                        with open(reports_json_path, "r", encoding="utf-8") as f:
+                            report_items = json.load(f)
+                        report_tuples = [
+                            (
+                                item["report_id"],
+                                item["created_at"],
+                                item["category"],
+                                item["category_label"],
+                                item["zone_id"],
+                                item["zone_name"],
+                                item["latitude"],
+                                item["longitude"],
+                                item["location_address"],
+                                item["description"],
+                                item.get("photo_url"),
+                                1 if item.get("has_voice_note") else 0,
+                                item.get("voice_note_transcript"),
+                                item["reporter_name"],
+                                item["reporter_contact"],
+                                item.get("channel", "WEB"),
+                                item.get("status", "PENDING_AUDIT"),
+                                item.get("points_awarded", 0),
+                                item.get("evidence_correlation"),
+                                item.get("verification_notes")
+                            )
+                            for item in report_items
+                        ]
+                        cursor.executemany("""
+                            INSERT INTO citizen_reports (
+                                report_id, created_at, category, category_label, zone_id, zone_name,
+                                latitude, longitude, location_address, description, photo_url,
+                                has_voice_note, voice_note_transcript, reporter_name, reporter_contact,
+                                channel, status, points_awarded, evidence_correlation, verification_notes
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, report_tuples)
+                    except Exception as e:
+                        logger.warning(f"Failed to seed citizen reports from JSON: {e}")
 
             conn.commit()
             logger.info(f"SQLite repository initialized with Citizen Reporting Loop at {self.db_path}")

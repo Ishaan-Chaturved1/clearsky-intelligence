@@ -1,0 +1,230 @@
+{
+  "DEL-AV-01": {
+    "pm25": 82.0,
+    "pm10": 265.0,
+    "ratio": 3.23,
+    "weather": {
+      "temp": 28.0,
+      "rh": 48.0,
+      "ws": 7.5,
+      "wd": 290.0,
+      "blh": 450.0
+    },
+    "fire": {
+      "count": 0,
+      "smoke": false,
+      "dist": null
+    },
+    "stale": false,
+    "mode": "DEMO"
+  },
+  "DEL-WZ-05": {
+    "pm25": 94.0,
+    "pm10": 295.0,
+    "ratio": 3.14,
+    "weather": {
+      "temp": 29.5,
+      "rh": 42.0,
+      "ws": 9.0,
+      "wd": 300.0,
+      "blh": 410.0
+    },
+    "fire": {
+      "count": 0,
+      "smoke": false,
+      "dist": null
+    },
+    "stale": false,
+    "mode": "DEMO"
+  },
+  "DEL-BAW-10": {
+    "pm25": 178.0,
+    "pm10": 210.0,
+    "ratio": 1.18,
+    "weather": {
+      "temp": 27.0,
+      "rh": 55.0,
+      "ws": 12.0,
+      "wd": 315.0,
+      "blh": 380.0
+    },
+    "fire": {
+      "count": 4,
+      "smoke": true,
+      "dist": 14.5
+    },
+    "stale": false,
+    "mode": "DEMO"
+  },
+  "DEL-OKH-06": {
+    "pm25": 70.0,
+    "pm10": 190.0,
+    "ratio": 2.71,
+    "weather": {
+      "temp": 22.0,
+      "rh": 86.0,
+      "ws": 6.0,
+      "wd": 110.0,
+      "blh": 280.0
+    },
+    "fire": {
+      "count": 0,
+      "smoke": false,
+      "dist": null
+    },
+    "stale": false,
+    "mode": "DEMO"
+  },
+  "DEL-IGI-09": {
+    "pm25": 65.0,
+    "pm10": 210.0,
+    "ratio": 3.23,
+    "weather": {
+      "temp": 31.0,
+      "rh": 38.0,
+      "ws": 23.5,
+      "wd": 270.0,
+      "blh": 650.0
+    },
+    "fire": {
+      "count": 0,
+      "smoke": false,
+      "dist": null
+    },
+    "stale": false,
+    "mode": "DEMO"
+  },
+  "DEL-ROH-07": {
+    "pm25": 58.0,
+    "pm10": null,
+    "ratio": null,
+    "weather": {
+      "temp": 28.0,
+      "rh": 50.0,
+      "ws": 8.0,
+      "wd": 280.0,
+      "blh": 500.0
+    },
+    "fire": {
+      "count": 0,
+      "smoke": false,
+      "dist": null
+    },
+    "stale": false,
+    "mode": "DEMO"
+  },
+  "DEL-DWK-08": {
+    "pm25": 85.0,
+    "pm10": 220.0,
+    "ratio": 2.59,
+    "weather": {
+      "temp": 27.5,
+      "rh": 52.0,
+      "ws": 9.5,
+      "wd": 285.0,
+      "blh": 460.0
+    },
+    "fire": {
+      "count": 0,
+      "smoke": false,
+      "dist": null
+    },
+    "stale": true,
+    "mode": "DEMO"
+  },
+  "DEL-ITO-11": {
+    "pm25": 142.0,
+    "pm10": 185.0,
+    "ratio": 1.30,
+    "weather": {
+      "temp": 29.0,
+      "rh": 54.0,
+      "ws": 6.5,
+      "wd": 275.0,
+      "blh": 340.0
+    },
+    "fire": {
+      "count": 0,
+      "smoke": false,
+      "dist": null
+    },
+    "stale": false,
+    "mode": "DEMO"
+  },
+  "DEL-JH-04": {
+    "pm25": 92.0,
+    "pm10": 240.0,
+    "ratio": 2.61,
+    "weather": {
+      "temp": 24.0,
+      "rh": 62.0,
+      "ws": 3.5,
+      "wd": 260.0,
+      "blh": 220.0
+    },
+    "fire": {
+      "count": 0,
+      "smoke": false,
+      "dist": null
+    },
+    "stale": false,
+    "mode": "DEMO"
+  },
+  "DEL-LOD-12": {
+    "pm25": 38.0,
+    "pm10": 74.0,
+    "ratio": 1.95,
+    "weather": {
+      "temp": 27.0,
+      "rh": 51.0,
+      "ws": 7.0,
+      "wd": 250.0,
+      "blh": 580.0
+    },
+    "fire": {
+      "count": 0,
+      "smoke": false,
+      "dist": null
+    },
+    "stale": false,
+    "mode": "DEMO"
+  },
+  "DEL-PB-02": {
+    "pm25": 72.0,
+    "pm10": 195.0,
+    "ratio": 2.71,
+    "weather": {
+      "temp": 28.5,
+      "rh": 49.0,
+      "ws": 8.0,
+      "wd": 280.0,
+      "blh": 480.0
+    },
+    "fire": {
+      "count": 0,
+      "smoke": false,
+      "dist": null
+    },
+    "stale": false,
+    "mode": "DEMO"
+  },
+  "DEL-RKP-03": {
+    "pm25": 54.0,
+    "pm10": 125.0,
+    "ratio": 2.31,
+    "weather": {
+      "temp": 28.0,
+      "rh": 50.0,
+      "ws": 8.5,
+      "wd": 280.0,
+      "blh": 520.0
+    },
+    "fire": {
+      "count": 0,
+      "smoke": false,
+      "dist": null
+    },
+    "stale": false,
+    "mode": "DEMO"
+  }
+}
