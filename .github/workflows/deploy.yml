@@ -97,7 +97,7 @@ jobs:
 
       - name: Build Serverless Application (SAM)
         run: |
-          sam build --template-file infrastructure/template.yaml
+          sam build --template-file infrastructure/template.yaml --debug
 
       - name: Deploy Serverless Infrastructure Stack via SAM
         env:

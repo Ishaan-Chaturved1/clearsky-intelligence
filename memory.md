@@ -254,3 +254,15 @@ clearsky-intelligence/
     ├── init_dynamodb.py         # DynamoDB table provisioning script
     └── seed_demo_data.py        # Database seeder from JSON catalogs
 ```
+
+---
+
+## 9. AWS SAM Build & Packaging Resolution
+
+- **Runtime & Architecture**: Python 3.11 on `x86_64` AWS Lambda (`manylinux2014_x86_64` / glibc 2.17 baseline).
+- **Dependency Pinning & Compatibility**:
+  - `numpy>=1.26.0,<2.0.0`: Prevents resolution of modern NumPy 2.3+ wheels that dropped `manylinux2014` support. Resolves to `numpy==1.26.4` which provides prebuilt `manylinux2014_x86_64` ELF binaries.
+  - `pandas>=2.2.0,<2.3.0`: Resolves to `pandas==2.2.3` with verified `manylinux2014_x86_64` wheels.
+- **CI/CD Diagnostics**: Added `--debug` flag to `sam build` in `.github/workflows/ci.yml` and `.github/workflows/deploy.yml` for complete pip resolution and wheel build logs.
+- **Verification Gates**: 100% pass on `cfn-lint`, `sam validate --lint`, `sam build`, `pytest backend/tests -v` (98 tests), and `npm run build`.
+
