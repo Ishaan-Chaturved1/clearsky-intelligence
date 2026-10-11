@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { Navbar } from './components/Navbar';
+import { TopNavigation } from './components/TopNavigation';
 import { Footer } from './components/Footer';
 import { LandingPage } from './pages/LandingPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { InvestigationsPage } from './pages/InvestigationsPage';
+import { ActionPlanPage } from './pages/ActionPlanPage';
+import { DocumentsPage } from './pages/DocumentsPage';
 import { MapExplorerPage } from './pages/MapExplorerPage';
 import { WaterAnalyticsPage } from './pages/WaterAnalyticsPage';
 import { MethodologyPage } from './pages/MethodologyPage';
@@ -43,24 +46,30 @@ const AppLayout: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-warm-50 text-earth-700">
+    <div className="min-h-screen flex flex-col bg-[#f8fafc] text-slate-800 antialiased selection:bg-emerald-500 selection:text-white">
       
-      {/* Hide Navbar on Landing Page */}
-      {!isLanding && (
-        <Navbar
+      {/* Floating Pill Top Navigation */}
+      <div className="sticky top-3 z-50 px-3 sm:px-6 lg:px-8 max-w-[1780px] w-full mx-auto pointer-events-auto">
+        <TopNavigation
           dataMode={dataMode}
           onRefresh={handleRefresh}
           isRefreshing={isRefreshing}
         />
-      )}
+      </div>
 
       {/* Main Routed Content */}
-      <main className={isLanding ? '' : 'flex-1 w-full max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-6 sm:py-8'}>
+      <main className="flex-1 w-full max-w-[1780px] mx-auto px-3 sm:px-6 lg:px-8 py-2 sm:py-3">
         <Routes>
-          <Route path="/" element={<LandingPage />} />
+          <Route path="/" element={<DashboardPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/map" element={<MapExplorerPage />} />
+          <Route path="/investigations" element={<InvestigationsPage />} />
           <Route path="/citizen-watch" element={<CitizenWatchPage />} />
+          <Route path="/action-plan" element={<ActionPlanPage />} />
+          <Route path="/documents" element={<DocumentsPage />} />
+          
+          {/* Preserved Core Tools */}
+          <Route path="/landing" element={<LandingPage />} />
+          <Route path="/map" element={<MapExplorerPage />} />
           <Route path="/water-analytics" element={<WaterAnalyticsPage />} />
           <Route path="/methodology" element={<MethodologyPage />} />
           <Route path="/data-sources" element={<DataSourcesPage />} />
@@ -69,7 +78,7 @@ const AppLayout: React.FC = () => {
         </Routes>
       </main>
 
-      {/* Persistent Footer for workspace pages */}
+      {/* Persistent Footer */}
       {!isLanding && <Footer />}
 
     </div>

@@ -1,269 +1,200 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Layers,
-  CheckCircle2,
-  AlertOctagon,
-  HelpCircle,
-  Droplets,
-  TrendingDown,
-  Clock,
-  Radio,
-  ArrowRight,
-  Sliders,
-} from 'lucide-react';
-import { KpiCard } from '../components/KpiCard';
-import { ZoneMap } from '../components/ZoneMap';
-import { ZoneCard } from '../components/ZoneCard';
-import { ZoneDetailDrawer } from '../components/ZoneDetailDrawer';
-import { DailyBriefBanner } from '../components/DailyBriefBanner';
-import { AlertsFeed } from '../components/AlertsFeed';
-import { AssumptionModal } from '../components/AssumptionModal';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../services/api';
 import {
   SystemOverview,
   ZoneWithLatest,
   WaterSavingsAnalytics,
-  AiDailyBrief,
+  StationObservation,
   AlertRecord,
-  DecisionType
 } from '../types';
-import { formatInteger, formatDateTime } from '../utils/formatters';
-import { Link } from 'react-router-dom';
+import { InteractivePollutionMap } from '../components/InteractivePollutionMap';
+import { PollutionTrendChart } from '../components/PollutionTrendChart';
+import { AirFlowCard } from '../components/AirFlowCard';
+import { CarbonMonitoringCard } from '../components/CarbonMonitoringCard';
+import { ZoneDetailDrawer } from '../components/ZoneDetailDrawer';
+import { AssumptionModal } from '../components/AssumptionModal';
 
 export const DashboardPage: React.FC = () => {
+  const [searchParams] = useSearchParams();
+
   const [overview, setOverview] = useState<SystemOverview | null>(null);
   const [zones, setZones] = useState<ZoneWithLatest[]>([]);
   const [waterData, setWaterData] = useState<WaterSavingsAnalytics | null>(null);
-  const [dailyBrief, setDailyBrief] = useState<AiDailyBrief | null>(null);
+  const [stations, setStations] = useState<StationObservation[]>([]);
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
-  const [stations, setStations] = useState<any[]>([]);
-  
-  const [selectedZone, setSelectedZone] = useState<ZoneWithLatest | null>(null);
-  const [activeFilter, setActiveFilter] = useState<'ALL' | DecisionType>('ALL');
-  const [isLoading, setIsLoading] = useState(true);
-  const [isAssumptionModalOpen, setIsAssumptionModalOpen] = useState(false);
 
-  // Assumptions state
+  const [selectedZone, setSelectedZone] = useState<ZoneWithLatest | null>(null);
+  const [selectedCustomName, setSelectedCustomName] = useState<string | null>(null);
+  const [customCoords, setCustomCoords] = useState<[number, number] | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const [isAssumptionModalOpen, setIsAssumptionModalOpen] = useState(false);
   const [baselineRate, setBaselineRate] = useState(3.0);
   const [litersPerOp, setLitersPerOp] = useState(5000.0);
+  const [elevatedTile, setElevatedTile] = useState<'trend' | 'airflow' | 'carbon' | null>(null);
 
-  const loadData = async () => {
-    try {
-      setIsLoading(true);
-      const [ov, zn, wt, br, al, st] = await Promise.all([
-        api.getOverview().catch(() => null),
-        api.getZones().catch(() => []),
-        api.getWaterSavings(7, baselineRate, litersPerOp).catch(() => null),
-        api.getDailyBrief().catch(() => null),
-        api.getAlerts(10).catch(() => []),
-        api.getStations().catch(() => [])
-      ]);
-
-      if (ov) setOverview(ov);
-      setZones(zn || []);
-      if (wt) setWaterData(wt);
-      if (br) setDailyBrief(br);
-      setAlerts(al || []);
-      setStations(st || []);
-    } catch (err) {
-      console.error('Failed to load dashboard data:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
+  // Close elevated tile on Escape key
   useEffect(() => {
-    loadData();
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setElevatedTile(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Load Dashboard Data
+  useEffect(() => {
+    const loadAll = async () => {
+      try {
+        setIsLoading(true);
+        const [ov, zn, wt, st, al] = await Promise.all([
+          api.getOverview().catch(() => null),
+          api.getZones().catch(() => []),
+          api.getWaterSavings(7, baselineRate, litersPerOp).catch(() => null),
+          api.getStations().catch(() => []),
+          api.getAlerts(10).catch(() => []),
+        ]);
+
+        if (ov) setOverview(ov);
+        if (zn && zn.length > 0) {
+          setZones(zn);
+          setSelectedZone(zn[0]); // Default focus zone
+        }
+        if (wt) setWaterData(wt);
+        if (st) setStations(st);
+        if (al) setAlerts(al);
+      } catch (err) {
+        console.error('Failed to load dashboard data:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadAll();
   }, [baselineRate, litersPerOp]);
 
-  // Filtered zones
-  const filteredZones = zones.filter((item) => {
-    if (activeFilter === 'ALL') return true;
-    const dec = item.latest_decision?.decision;
-    if (activeFilter === 'INTERVENTION_RECOMMENDED') {
-      return dec === 'INTERVENTION_RECOMMENDED' || dec === 'TARGETED_INTERVENTION_RECOMMENDED';
-    }
-    if (activeFilter === 'INTERVENTION_NOT_RECOMMENDED' || activeFilter === 'INTERVENTION_DISCOURAGED') {
-      return dec === 'INTERVENTION_DISCOURAGED' || dec === 'INTERVENTION_NOT_RECOMMENDED';
-    }
-    return dec === activeFilter;
-  });
+  // Handle URL params if any (e.g., from search bar)
+  useEffect(() => {
+    const lat = searchParams.get('lat');
+    const lon = searchParams.get('lon');
+    const name = searchParams.get('name');
 
-  const handleApplyAssumptions = (newRate: number, newLiters: number) => {
-    setBaselineRate(newRate);
-    setLitersPerOp(newLiters);
+    if (lat && lon) {
+      const latNum = parseFloat(lat);
+      const lonNum = parseFloat(lon);
+      if (!isNaN(latNum) && !isNaN(lonNum)) {
+        setCustomCoords([latNum, lonNum]);
+        if (name) setSelectedCustomName(decodeURIComponent(name));
+      }
+    }
+  }, [searchParams]);
+
+  // Map Click Handler for inspecting any geographical point
+  const handleMapClick = async (lat: number, lon: number) => {
+    setElevatedTile(null);
+    try {
+      setCustomCoords([lat, lon]);
+      const res = await api.reverseGeo(lat, lon);
+      if (res?.display_name) {
+        setSelectedCustomName(res.display_name.split(',')[0]);
+      }
+    } catch {
+      setSelectedCustomName(`Point (${lat.toFixed(2)}, ${lon.toFixed(2)})`);
+    }
   };
 
-  const handleAlertSelectZone = (zoneId: string) => {
-    const target = zones.find((z) => z.zone.zone_id === zoneId);
-    if (target) setSelectedZone(target);
-  };
+  // Extract metrics from selectedZone or default fallbacks
+  const latestReading = selectedZone?.latest_reading;
+  const weather = latestReading?.weather;
+
+  const rainfall = weather?.precipitation_mmh ?? 0;
+  const humidity = weather?.relative_humidity ?? 84;
+  const temperature = weather?.temperature_c ?? 23;
+  const aqiValue =
+    latestReading?.pm25?.value !== null && latestReading?.pm25?.value !== undefined
+      ? Math.round(latestReading.pm25.value)
+      : 42;
+  const windSpeedKmh = weather?.wind_speed_kmh ?? 7.5;
+  const windDirectionDeg = weather?.wind_direction_deg ?? 45;
+  const boundaryLayer = weather?.boundary_layer_height_m ?? 450;
+
+  const centerCoords: [number, number] = customCoords
+    ? customCoords
+    : selectedZone
+      ? [selectedZone.zone.latitude, selectedZone.zone.longitude]
+      : [28.6139, 77.2090]; // Delhi NCR central focus
 
   return (
-    <div className="space-y-6 animate-fade-up">
-      
-      {/* Page Title */}
-      <div>
-        <h1 className="font-sentinel font-bold text-3xl text-earth-900 tracking-tight">Command Center</h1>
-        <p className="text-sm font-clarendon text-earth-600 mt-1">Real-time environmental monitoring &amp; targeted particulate suppression</p>
-      </div>
+    <div className="flex flex-col gap-2 sm:gap-3 animate-fade-up w-full">
 
-      {/* KPI Cards — compact 4-column grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-        <KpiCard
-          title="Zones"
-          value={overview?.total_monitored_zones || zones.length || '—'}
-          subtitle="Delhi NCR sectors"
-          icon={Layers}
-          badge="Active"
-        />
-        <KpiCard
-          title="Candidates"
-          value={overview?.intervention_candidates ?? '—'}
-          subtitle="Coarse dust dominant"
-          icon={CheckCircle2}
-          badge="Priority"
-          badgeColor="emerald"
-          accentBorder={true}
-        />
-        <KpiCard
-          title="Discouraged"
-          value={overview?.intervention_discouraged ?? '—'}
-          subtitle="Smoke / Humidity / Wind"
-          icon={AlertOctagon}
-          badge="Suppressed"
-          badgeColor="rose"
-        />
-        <KpiCard
-          title="Water Saved"
-          value={
-            waterData
-              ? `${(waterData.estimated_water_saved_liters / 1000).toFixed(0)}k L`
-              : '—'
-          }
-          subtitle={`vs ${baselineRate} runs/day`}
-          icon={Droplets}
-          badge="Model"
-          badgeColor="sky"
-        />
-      </div>
+      {/* Main Full-Width Interactive Map Canvas with Floating Bubbles & Floating Analytics Cards */}
+      <section className="w-full relative shadow-sm">
+        <InteractivePollutionMap
+          center={centerCoords}
+          zoom={12}
+          zones={zones}
+          selectedZone={selectedZone}
+          onSelectZone={(zone) => {
+            setSelectedZone(zone);
+            setCustomCoords(null);
+            setSelectedCustomName(zone.zone.name);
+          }}
+          stations={stations}
+          onMapClick={handleMapClick}
+          selectedLocationName={selectedCustomName || selectedZone?.zone?.name}
+          rainfallMm={rainfall}
+          humidityPercent={humidity}
+          temperatureC={temperature}
+          aqiOrPm25={aqiValue}
+        >
+          {/* Bottom Row of 3 Floating Glass Analytics Cards Hovering Above the Map */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-12 gap-3.5 sm:gap-4.5 w-full pointer-events-none">
+            {/* 1. Pollution Trend Analysis (Bottom-Left Card - 5 columns) */}
+            <div className={`xl:col-span-5 h-full pointer-events-auto transition-all ${elevatedTile === 'trend' ? 'relative z-[560]' : 'relative z-[130]'}`}>
+              <PollutionTrendChart
+                currentAqi={aqiValue}
+                currentSeverity={
+                  aqiValue > 100
+                    ? 'High Pollution'
+                    : aqiValue > 50
+                      ? 'Moderate Pollution'
+                      : 'Good Air Quality'
+                }
+                isElevated={elevatedTile === 'trend'}
+                onClick={() => setElevatedTile(elevatedTile === 'trend' ? null : 'trend')}
+                className="h-full"
+              />
+            </div>
 
-      {/* Daily Brief */}
-      <DailyBriefBanner brief={dailyBrief} />
+            {/* 2. Air Flow Status (Center Card - 4 columns) */}
+            <div className={`xl:col-span-4 h-full pointer-events-auto transition-all ${elevatedTile === 'airflow' ? 'relative z-[560]' : 'relative z-[130]'}`}>
+              <AirFlowCard
+                windSpeedKmh={windSpeedKmh}
+                windSpeedMs={windSpeedKmh ? windSpeedKmh / 3.6 : 1.0}
+                windDirectionDeg={windDirectionDeg}
+                boundaryLayerHeight={boundaryLayer}
+                isElevated={elevatedTile === 'airflow'}
+                onClick={() => setElevatedTile(elevatedTile === 'airflow' ? null : 'airflow')}
+                className="h-full"
+              />
+            </div>
 
-      {/* Map & Zone Queue */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* Map */}
-        <div className="lg:col-span-8 space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="font-sentinel font-bold text-lg text-earth-900">
-              Regional Map
-            </h2>
-            <Link
-              to="/map"
-              className="text-xs font-sans font-semibold text-accent-500 hover:text-accent-600 flex items-center gap-1 transition-colors"
-            >
-              <span>Full Explorer</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-          <ZoneMap
-            zones={zones}
-            selectedZone={selectedZone}
-            onSelectZone={setSelectedZone}
-            stations={stations}
-            height="540px"
-          />
-        </div>
-
-        {/* Zone Priority Queue */}
-        <div className="lg:col-span-4 flex flex-col h-[590px] xl:h-[620px]">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-sentinel font-bold text-sm text-earth-900">
-              Sector Queue
-            </h3>
-            {/* Filter Buttons */}
-            <div className="flex items-center gap-1 bg-warm-100 p-0.5 rounded-xl border border-warm-200 text-[10px]">
-              <button
-                onClick={() => setActiveFilter('ALL')}
-                className={`px-2 py-1 rounded-lg font-sans ${
-                  activeFilter === 'ALL' ? 'bg-white text-earth-800 font-semibold shadow-warm-sm' : 'text-earth-400'
-                }`}
-              >
-                All
-              </button>
-              <button
-                onClick={() => setActiveFilter('INTERVENTION_RECOMMENDED')}
-                className={`px-2 py-1 rounded-lg font-sans ${
-                  activeFilter === 'INTERVENTION_RECOMMENDED' ? 'bg-sage-500/10 text-sage-700 font-semibold' : 'text-earth-400'
-                }`}
-                title="Recommended & Targeted"
-              >
-                Rec
-              </button>
-              <button
-                onClick={() => setActiveFilter('INTERVENTION_NOT_RECOMMENDED')}
-                className={`px-2 py-1 rounded-lg font-sans ${
-                  activeFilter === 'INTERVENTION_NOT_RECOMMENDED' || activeFilter === 'INTERVENTION_DISCOURAGED' ? 'bg-accent-500/10 text-accent-700 font-semibold' : 'text-earth-400'
-                }`}
-                title="Discouraged"
-              >
-                Disc
-              </button>
-              <button
-                onClick={() => setActiveFilter('ADVISORY_ONLY')}
-                className={`px-2 py-1 rounded-lg font-sans ${
-                  activeFilter === 'ADVISORY_ONLY' ? 'bg-warm-200 text-earth-800 font-semibold' : 'text-earth-400'
-                }`}
-                title="Advisory Only"
-              >
-                Adv
-              </button>
-              <button
-                onClick={() => setActiveFilter('ALTERNATIVE_DUST_CONTROL_SUGGESTED')}
-                className={`px-2 py-1 rounded-lg font-sans ${
-                  activeFilter === 'ALTERNATIVE_DUST_CONTROL_SUGGESTED' ? 'bg-amber-500/10 text-amber-700 font-semibold' : 'text-earth-400'
-                }`}
-                title="Alternative Dust Control"
-              >
-                Alt
-              </button>
+            {/* 3. Carbon Monitoring (Right Card - 3 columns) */}
+            <div className={`md:col-span-2 xl:col-span-3 h-full pointer-events-auto transition-all ${elevatedTile === 'carbon' ? 'relative z-[560]' : 'relative z-[130]'}`}>
+              <CarbonMonitoringCard
+                netCarbonOffset="101,850,000 Ton Co2e"
+                waterSavedLiters={waterData?.estimated_water_saved_liters}
+                isElevated={elevatedTile === 'carbon'}
+                onClick={() => setElevatedTile(elevatedTile === 'carbon' ? null : 'carbon')}
+                className="h-full"
+              />
             </div>
           </div>
+        </InteractivePollutionMap>
+      </section>
 
-          <p className="text-[11px] text-earth-400 mb-2">
-            {filteredZones.length} of {zones.length} sectors
-          </p>
-
-          <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
-            {filteredZones.map((item) => (
-              <ZoneCard
-                key={item.zone.zone_id}
-                item={item}
-                onSelect={setSelectedZone}
-                isSelected={selectedZone?.zone.zone_id === item.zone.zone_id}
-              />
-            ))}
-          </div>
-        </div>
-
-      </div>
-
-      {/* Bottom: Alerts only (chart moved to dedicated page) */}
-      <div className="bg-white rounded-2xl p-5 border border-warm-200 shadow-warm-sm">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-sentinel font-bold text-base text-earth-900">
-            Recent Alerts
-          </h3>
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-warm-100 border border-warm-200 text-earth-400">
-            Audit Trail
-          </span>
-        </div>
-        <AlertsFeed alerts={alerts} onSelectZone={handleAlertSelectZone} />
-      </div>
-
-      {/* Zone Detail Drawer */}
+      {/* Detailed Zone Drawer on Selection */}
       <ZoneDetailDrawer
         item={selectedZone}
         onClose={() => setSelectedZone(null)}
@@ -275,9 +206,14 @@ export const DashboardPage: React.FC = () => {
         onClose={() => setIsAssumptionModalOpen(false)}
         currentBaselineRate={baselineRate}
         currentLitersPerOp={litersPerOp}
-        onApply={handleApplyAssumptions}
+        onApply={(r, l) => {
+          setBaselineRate(r);
+          setLitersPerOp(l);
+        }}
       />
 
     </div>
   );
 };
+
+export default DashboardPage;
