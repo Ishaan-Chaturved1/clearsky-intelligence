@@ -69,6 +69,10 @@ class DynamoDBRepository(BaseRepository):
             self._is_available = True
             logger.info("DynamoDB client connected and verified tables successfully.")
         except Exception as e:
+            strict_storage = os.getenv("STRICT_AWS_STORAGE", "false").lower() == "true"
+            if strict_storage:
+                logger.error(f"FATAL: DynamoDB unavailable in strict production mode ({e}). Ephemeral fallback disallowed.")
+                raise RuntimeError(f"DynamoDB unavailable in strict production mode: {e}") from e
             logger.warning(f"DynamoDB credentials/tables unavailable ({e}). Activating JSON fallback.")
             self._is_available = False
             self._fallback_repo = JSONRepository()
