@@ -39,7 +39,7 @@ def test_deploy_workflow_structure_and_jobs(deploy_workflow_content):
     # Verify dependency chain
     assert jobs["deploy-infrastructure"]["needs"] == "pre-deploy-check"
     assert jobs["deploy-application"]["needs"] == ["pre-deploy-check", "deploy-infrastructure"]
-    assert jobs["post-deploy-verify"]["needs"] == ["deploy-infrastructure", "deploy-application"]
+    assert jobs["post-deploy-verify"]["needs"] == ["pre-deploy-check", "deploy-infrastructure", "deploy-application"]
 
 
 def test_deploy_workflow_no_continue_on_error(deploy_workflow_content):

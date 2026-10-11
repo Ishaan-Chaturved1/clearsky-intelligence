@@ -1,4 +1,5 @@
 name: ClearSky Intelligence Continuous Deployment
+# TEST CONFIG: defaults to PREPARATION_ONLY. No live AWS resources are changed unless DEPLOY is explicitly selected.
 
 on:
   workflow_dispatch:
@@ -14,7 +15,7 @@ on:
       deployment_mode:
         description: 'Execution Mode: DEPLOY (execute live AWS deployment) or PREPARATION_ONLY (build & package without deploying)'
         required: true
-        default: 'DEPLOY'
+        default: 'PREPARATION_ONLY'
         type: choice
         options:
           - DEPLOY
@@ -131,7 +132,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          aws-region: us-east-1
           audience: sts.amazonaws.com
 
       - name: Verify AWS Caller Identity
@@ -149,7 +150,7 @@ jobs:
           OPENAQ_KEY: ${{ secrets.OPENAQ_API_KEY }}
           FIRMS_KEY: ${{ secrets.NASA_FIRMS_MAP_KEY }}
           CPCB_KEY: ${{ secrets.DATA_GOV_IN_API_KEY }}
-          REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          REGION: us-east-1
         run: |
           sam deploy \
             --template-file .aws-sam/build/template.yaml \
@@ -213,7 +214,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          aws-region: us-east-1
           audience: sts.amazonaws.com
 
       - name: Download Deployment Package
@@ -227,7 +228,7 @@ jobs:
           EB_APP_NAME: ${{ secrets.EB_APP_NAME }}
           EB_ENV_NAME: ${{ secrets.EB_ENV_NAME }}
           S3_DEPLOY_BUCKET: ${{ secrets.S3_DEPLOY_BUCKET }}
-          REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          REGION: us-east-1
         run: |
           VERSION_LABEL="deploy-$(date +%Y%m%d%H%M%S)-${{ github.sha }}"
           echo "Uploading bundle to s3://${S3_DEPLOY_BUCKET}/clearsky/${VERSION_LABEL}.zip"
@@ -274,7 +275,7 @@ jobs:
 
   post-deploy-verify:
     name: Run Post-Deployment Smoke Tests
-    needs: [deploy-infrastructure, deploy-application]
+    needs: [pre-deploy-check, deploy-infrastructure, deploy-application]
     if: needs.pre-deploy-check.outputs.deployment_mode == 'DEPLOY'
     runs-on: ubuntu-latest
     steps:
