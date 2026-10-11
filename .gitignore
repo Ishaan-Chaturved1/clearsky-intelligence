@@ -48,4 +48,5 @@ data/readings.json
 data/redemptions.json
 data/s3_lake/
 data/test_s3_lake/
+backend/data/
 clearsky-deploy.zip

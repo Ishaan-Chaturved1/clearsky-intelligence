@@ -3,16 +3,16 @@ import { ShieldCheck, Droplets, Info } from 'lucide-react';
 
 export const Footer: React.FC = () => {
   return (
-    <footer className="bg-white/50 backdrop-blur-sm border-t border-warm-200 mt-16 text-earth-500 text-xs py-8">
+    <footer className="bg-white/60 backdrop-blur-md border-t border-slate-200/70 mt-16 text-slate-500 text-xs py-8">
       <div className="w-full max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pb-6 border-b border-warm-200">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pb-6 border-b border-slate-200/70">
           
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <span className="font-sentinel font-bold text-earth-900 text-sm">ClearSky Intelligence</span>
-              <span className="text-[10px] text-accent-600 font-mono font-medium px-1.5 py-0.5 bg-accent-500/10 rounded-md border border-accent-500/20">v1.2</span>
+              <span className="font-bold text-slate-900 text-sm">ClearSky Intelligence</span>
+              <span className="text-[10px] text-emerald-700 font-mono font-medium px-1.5 py-0.5 bg-emerald-50 rounded-md border border-emerald-200">v1.2</span>
             </div>
-            <p className="font-clarendon text-earth-500 leading-relaxed text-[11px]">
+            <p className="text-slate-500 leading-relaxed text-[11px]">
               AI-powered environmental decision support for municipal air quality operations.
             </p>
           </div>

@@ -74,6 +74,11 @@ class S3DataLakeRepository:
         d = dt or datetime.now(timezone.utc)
         return f"year={d.strftime('%Y')}/month={d.strftime('%m')}/day={d.strftime('%d')}"
 
+    def _safe_local_path(self, s3_key: str) -> Path:
+        """Sanitizes invalid filesystem characters like ':' when storing in local fallback directory on Windows."""
+        safe_key = s3_key.replace(":", "_") if os.name == "nt" else s3_key
+        return self.local_dir / safe_key
+
     def put_raw_telemetry(
         self,
         provider: str,
@@ -110,10 +115,10 @@ class S3DataLakeRepository:
             raise RuntimeError("Cannot write raw telemetry to S3: S3 Data Lake is unavailable in strict production mode.")
 
         # Local fallback
-        dest = self.local_dir / s3_key
+        dest = self._safe_local_path(s3_key)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
-        return str(dest)
+        return dest.as_posix()
 
     def put_processed_reading(
         self,
@@ -150,10 +155,10 @@ class S3DataLakeRepository:
         if strict_storage:
             raise RuntimeError("Cannot write processed reading to S3: S3 Data Lake is unavailable in strict production mode.")
 
-        dest = self.local_dir / s3_key
+        dest = self._safe_local_path(s3_key)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
-        return str(dest)
+        return dest.as_posix()
 
     def put_investigation_dossier(
         self,
@@ -188,10 +193,10 @@ class S3DataLakeRepository:
         if strict_storage:
             raise RuntimeError("Cannot write investigation to S3: S3 Data Lake is unavailable in strict production mode.")
 
-        dest = self.local_dir / s3_key
+        dest = self._safe_local_path(s3_key)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
-        return str(dest)
+        return dest.as_posix()
 
     def get_object_content(self, s3_key: str) -> Optional[str]:
         """
@@ -204,7 +209,10 @@ class S3DataLakeRepository:
             except Exception as exc:
                 logger.warning(f"Failed reading object from S3 ({exc}): {s3_key}")
 
-        local_path = self.local_dir / s3_key
+        local_path = self._safe_local_path(s3_key)
         if local_path.exists():
             return local_path.read_text(encoding="utf-8")
+        orig_path = self.local_dir / s3_key
+        if orig_path.exists():
+            return orig_path.read_text(encoding="utf-8")
         return None
