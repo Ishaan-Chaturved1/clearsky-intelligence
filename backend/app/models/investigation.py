@@ -204,6 +204,34 @@ class EvidenceItem(BaseModel):
     data_quality_indicators: Dict[str, Any] = Field(default_factory=dict)
     known_limitations: List[str] = Field(default_factory=list)
     provenance: ProvenanceType
+    retrieval_timestamp: Optional[datetime] = None
+    observation_timestamp: Optional[datetime] = None
+    data_freshness_seconds: Optional[float] = None
+    relationship_to_hypothesis: Optional[str] = None
+    evidence_quality_score: Optional[float] = None
+    missing_information: List[str] = Field(default_factory=list)
+
+
+class InvestigationReadinessReport(BaseModel):
+    """
+    Deterministic investigation readiness and missing-data assessment.
+    Establishes whether adequate empirical evidence exists to support an investigation.
+    """
+    investigation_id: str
+    investigation_type: str = Field(default="GENERAL_SURGE", description="LOCAL_DUST, REGIONAL_BIOMASS_BURNING, INDUSTRIAL_EMISSIONS, GENERAL_SURGE")
+    required_evidence_categories: List[str] = Field(default_factory=list)
+    available_evidence_categories: List[str] = Field(default_factory=list)
+    missing_evidence_categories: List[str] = Field(default_factory=list)
+    stale_evidence_categories: List[str] = Field(default_factory=list)
+    failed_data_sources: List[str] = Field(default_factory=list)
+    geographic_coverage_limitations: List[str] = Field(default_factory=list)
+    temporal_coverage_limitations: List[str] = Field(default_factory=list)
+    transport_analysis_possible: bool = True
+    quantitative_attribution_defensible: bool = False
+    readiness_score: float = Field(default=100.0, ge=0.0, le=100.0)
+    readiness_verdict: str = Field(default="READY", description="READY, PARTIAL, INSUFFICIENT")
+    additional_data_needed: List[str] = Field(default_factory=list)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class SourceContributionAssessment(BaseModel):
@@ -253,17 +281,20 @@ class Investigation(BaseModel):
     supporting_evidence: List[EvidenceItem] = Field(default_factory=list)
     contradicting_evidence: List[EvidenceItem] = Field(default_factory=list)
     context_evidence: List[EvidenceItem] = Field(default_factory=list)
+    insufficient_evidence: List[EvidenceItem] = Field(default_factory=list)
     analysis_methods: List[str] = Field(default_factory=list)
     data_quality_limitations: List[str] = Field(default_factory=list)
     alternative_explanations: List[str] = Field(default_factory=list)
     missing_evidence: List[str] = Field(default_factory=list)
+    readiness: Optional[InvestigationReadinessReport] = None
+    attribution_type: str = Field(default="QUALITATIVE_HYPOTHESIS", description="QUALITATIVE_HYPOTHESIS, NONE, SCREENING_LEVEL")
     status: str = Field(default="OPEN", description="OPEN, UNRESOLVED, INCONCLUSIVE, COMPLETED")
     created_at: datetime
     updated_at: datetime
 
     @property
     def evidence_ledger(self) -> List[EvidenceItem]:
-        return self.supporting_evidence + self.contradicting_evidence + self.context_evidence
+        return self.supporting_evidence + self.contradicting_evidence + self.context_evidence + self.insufficient_evidence
 
 
 class InvestigationReport(BaseModel):

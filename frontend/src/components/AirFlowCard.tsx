@@ -14,30 +14,32 @@ interface AirFlowCardProps {
 }
 
 export const AirFlowCard: React.FC<AirFlowCardProps> = ({
-  windSpeedKmh = 7.5,
-  windSpeedMs = 1.0,
-  windDirectionDeg = 45,
-  boundaryLayerHeight = 450,
+  windSpeedKmh = null,
+  windSpeedMs = null,
+  windDirectionDeg = null,
+  boundaryLayerHeight = null,
   className = '',
   isElevated = false,
   peekMode = true,
   onClick,
 }) => {
-  const speedKmhDisplay =
-    windSpeedKmh !== null && windSpeedKmh !== undefined ? windSpeedKmh.toFixed(1) : '7.5';
+  const hasData = windSpeedKmh !== null && windSpeedKmh !== undefined;
+  const speedKmhDisplay = hasData ? windSpeedKmh.toFixed(1) : '--';
   const speedMsDisplay =
     windSpeedMs !== null && windSpeedMs !== undefined
       ? windSpeedMs.toFixed(1)
-      : windSpeedKmh !== null && windSpeedKmh !== undefined
-      ? (windSpeedKmh / 3.6).toFixed(1)
-      : '1.0';
+      : hasData
+      ? (windSpeedKmh! / 3.6).toFixed(1)
+      : '--';
 
-  const deg = windDirectionDeg !== null && windDirectionDeg !== undefined ? windDirectionDeg : 45;
+  const deg = windDirectionDeg !== null && windDirectionDeg !== undefined ? windDirectionDeg : 0;
 
   // Derive atmospheric status based on speed & boundary layer
-  const isFavorable = Number(speedKmhDisplay) >= 5 && (boundaryLayerHeight || 400) >= 300;
-  const statusTitle = isFavorable ? 'Fresh Air Movement!' : 'Stagnant Boundary Layer!';
-  const statusSubtitle = isFavorable
+  const isFavorable = hasData && Number(speedKmhDisplay) >= 5 && (boundaryLayerHeight ?? 400) >= 300;
+  const statusTitle = !hasData ? 'Awaiting Wind Telemetry' : isFavorable ? 'Fresh Air Movement!' : 'Stagnant Boundary Layer!';
+  const statusSubtitle = !hasData
+    ? 'Surface meteorological feed standby.'
+    : isFavorable
     ? 'Wind circulation is helping reduce pollutant.'
     : 'Low wind speed is trapping surface pollutants.';
 

@@ -1,6 +1,6 @@
 name: ClearSky Intelligence Continuous Deployment
 
-on:
+'on':
   push:
     branches: [ main ]
   workflow_dispatch:
@@ -13,6 +13,14 @@ on:
         options:
           - staging
           - production
+      deployment_mode:
+        description: 'Execution Mode: DEPLOY (execute live AWS deployment) or PREPARATION_ONLY (build & package without deploying)'
+        required: true
+        default: 'DEPLOY'
+        type: choice
+        options:
+          - DEPLOY
+          - PREPARATION_ONLY
 
 permissions:
   id-token: write
@@ -23,24 +31,35 @@ jobs:
     name: Verify Tests, Build Frontend & Package EB Bundle
     runs-on: ubuntu-latest
     outputs:
-      has_aws_role: ${{ steps.check-creds.outputs.has_aws_role }}
+      deployment_mode: ${{ steps.eval-mode.outputs.deployment_mode }}
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Verify Deployment Prerequisites
-        id: check-creds
+      - name: Evaluate Deployment Mode & Prerequisites
+        id: eval-mode
         env:
           ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          INPUT_MODE: ${{ github.event.inputs.deployment_mode }}
         run: |
-          if [ -n "$ROLE_ARN" ]; then
-            echo "has_aws_role=true" >> "$GITHUB_OUTPUT"
-            echo "AWS OIDC Role configured: $ROLE_ARN"
+          MODE="${INPUT_MODE:-DEPLOY}"
+          echo "deployment_mode=${MODE}" >> "$GITHUB_OUTPUT"
+          echo "Selected Execution Mode: ${MODE}"
+
+          if [ "$MODE" = "PREPARATION_ONLY" ]; then
+            echo "::notice title=Execution Mode::Running in PREPARATION_ONLY mode. Artifacts will be tested and packaged, but no live AWS deployment will occur."
+            echo "### ⚠️ PREPARATION ONLY EXECUTION" >> "$GITHUB_STEP_SUMMARY"
+            echo "Artifacts are verified and packaged successfully. No AWS deployment was attempted or claimed." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "has_aws_role=false" >> "$GITHUB_OUTPUT"
-            echo "AWS OIDC Role ARN secret (AWS_DEPLOY_ROLE_ARN) is not yet set in repository secrets."
-            echo "Artifact packaging will proceed, but live deployment will be skipped until OIDC is provisioned."
+            if [ -z "$ROLE_ARN" ]; then
+              echo "::error title=Missing AWS Secret::AWS_DEPLOY_ROLE_ARN secret is missing in GitHub Repository Secrets. In DEPLOY mode, live deployment requires a configured OIDC role ARN."
+              echo "### ❌ DEPLOYMENT BLOCKED: Missing AWS_DEPLOY_ROLE_ARN" >> "$GITHUB_STEP_SUMMARY"
+              echo "The repository secret \`AWS_DEPLOY_ROLE_ARN\` is not configured. Live deployment cannot proceed without AWS credentials." >> "$GITHUB_STEP_SUMMARY"
+              echo "To run artifact verification and packaging only without deploying, trigger workflow_dispatch with deployment_mode=PREPARATION_ONLY." >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            echo "AWS OIDC Role ARN verified: ${ROLE_ARN}"
           fi
 
       - name: Set up Python 3.11
@@ -91,7 +110,7 @@ jobs:
   deploy-infrastructure:
     name: Deploy Serverless Infrastructure via SAM
     needs: pre-deploy-check
-    if: needs.pre-deploy-check.outputs.has_aws_role == 'true'
+    if: needs.pre-deploy-check.outputs.deployment_mode == 'DEPLOY'
     runs-on: ubuntu-latest
     environment: production
     outputs:
@@ -129,13 +148,14 @@ jobs:
           OPENAQ_KEY: ${{ secrets.OPENAQ_API_KEY }}
           FIRMS_KEY: ${{ secrets.NASA_FIRMS_MAP_KEY }}
           CPCB_KEY: ${{ secrets.DATA_GOV_IN_API_KEY }}
+          REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
         run: |
           sam deploy \
             --template-file .aws-sam/build/template.yaml \
             --stack-name clearsky-serverless-${TARGET_ENV} \
             --capabilities CAPABILITY_IAM \
             --no-fail-on-empty-changeset \
-            --region ${{ secrets.AWS_REGION || 'us-east-1' }} \
+            --region ${REGION} \
             --parameter-overrides \
                 Environment=${TARGET_ENV} \
                 OpenAQApiKey="${OPENAQ_KEY}" \
@@ -144,22 +164,27 @@ jobs:
 
           API_URL=$(aws cloudformation describe-stacks \
             --stack-name clearsky-serverless-${TARGET_ENV} \
-            --region ${{ secrets.AWS_REGION || 'us-east-1' }} \
+            --region ${REGION} \
             --query "Stacks[0].Outputs[?OutputKey=='HttpApiUrl'].OutputValue" \
-            --output text || true)
+            --output text)
+
+          if [ -z "$API_URL" ] || [ "$API_URL" = "None" ]; then
+            echo "::error::Failed to retrieve HttpApiUrl from CloudFormation stack outputs."
+            exit 1
+          fi
           echo "serverless_api_url=${API_URL}" >> "$GITHUB_OUTPUT"
 
           BUCKET_NAME=$(aws cloudformation describe-stacks \
             --stack-name clearsky-serverless-${TARGET_ENV} \
-            --region ${{ secrets.AWS_REGION || 'us-east-1' }} \
+            --region ${REGION} \
             --query "Stacks[0].Outputs[?OutputKey=='DataLakeBucketName'].OutputValue" \
-            --output text || true)
+            --output text)
           echo "data_lake_bucket=${BUCKET_NAME}" >> "$GITHUB_OUTPUT"
 
   deploy-application:
     name: Deploy Main Web Application to Elastic Beanstalk
     needs: [pre-deploy-check, deploy-infrastructure]
-    if: needs.pre-deploy-check.outputs.has_aws_role == 'true'
+    if: needs.pre-deploy-check.outputs.deployment_mode == 'DEPLOY'
     runs-on: ubuntu-latest
     environment: production
     outputs:
@@ -168,6 +193,17 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Validate Elastic Beanstalk Prerequisites
+        env:
+          EB_APP_NAME: ${{ secrets.EB_APP_NAME }}
+          EB_ENV_NAME: ${{ secrets.EB_ENV_NAME }}
+          S3_DEPLOY_BUCKET: ${{ secrets.S3_DEPLOY_BUCKET }}
+        run: |
+          if [ -z "$EB_APP_NAME" ] || [ -z "$EB_ENV_NAME" ] || [ -z "$S3_DEPLOY_BUCKET" ]; then
+            echo "::error title=Missing EB Configuration::Required Elastic Beanstalk secrets (EB_APP_NAME, EB_ENV_NAME, S3_DEPLOY_BUCKET) are missing in GitHub secrets. In DEPLOY mode, all target environment settings must be configured."
+            exit 1
+          fi
 
       - name: Configure AWS Credentials via GitHub OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -187,41 +223,55 @@ jobs:
           EB_APP_NAME: ${{ secrets.EB_APP_NAME }}
           EB_ENV_NAME: ${{ secrets.EB_ENV_NAME }}
           S3_DEPLOY_BUCKET: ${{ secrets.S3_DEPLOY_BUCKET }}
+          REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
         run: |
-          if [ -n "$EB_APP_NAME" ] && [ -n "$EB_ENV_NAME" ] && [ -n "$S3_DEPLOY_BUCKET" ]; then
-            VERSION_LABEL="deploy-$(date +%Y%m%d%H%M%S)-${{ github.sha }}"
-            echo "Uploading bundle to s3://${S3_DEPLOY_BUCKET}/clearsky/${VERSION_LABEL}.zip"
-            aws s3 cp clearsky-deploy.zip "s3://${S3_DEPLOY_BUCKET}/clearsky/${VERSION_LABEL}.zip"
-            
-            aws elasticbeanstalk create-application-version \
-              --application-name "$EB_APP_NAME" \
-              --version-label "$VERSION_LABEL" \
-              --source-bundle S3Bucket="$S3_DEPLOY_BUCKET",S3Key="clearsky/${VERSION_LABEL}.zip"
-              
-            aws elasticbeanstalk update-environment \
-              --environment-name "$EB_ENV_NAME" \
-              --version-label "$VERSION_LABEL"
-            
-            echo "Waiting for Elastic Beanstalk environment update to complete..."
-            aws elasticbeanstalk wait environment-updated --environment-name "$EB_ENV_NAME"
-            
-            CNAME=$(aws elasticbeanstalk describe-environments \
-              --environment-names "$EB_ENV_NAME" \
-              --query "Environments[0].CNAME" \
-              --output text || true)
-            if [ -n "$CNAME" ] && [ "$CNAME" != "None" ]; then
-              echo "eb_app_url=http://${CNAME}" >> "$GITHUB_OUTPUT"
-              echo "Elastic Beanstalk deployed at: http://${CNAME}"
-            fi
-          else
-            echo "Elastic Beanstalk credentials (EB_APP_NAME, EB_ENV_NAME, S3_DEPLOY_BUCKET) not set in secrets."
-            echo "Application bundle clearsky-deploy.zip is prepared and ready for manual or CLI deployment."
+          VERSION_LABEL="deploy-$(date +%Y%m%d%H%M%S)-${{ github.sha }}"
+          echo "Uploading bundle to s3://${S3_DEPLOY_BUCKET}/clearsky/${VERSION_LABEL}.zip"
+          aws s3 cp clearsky-deploy.zip "s3://${S3_DEPLOY_BUCKET}/clearsky/${VERSION_LABEL}.zip" --region ${REGION}
+
+          aws elasticbeanstalk create-application-version \
+            --application-name "$EB_APP_NAME" \
+            --version-label "$VERSION_LABEL" \
+            --source-bundle S3Bucket="$S3_DEPLOY_BUCKET",S3Key="clearsky/${VERSION_LABEL}.zip" \
+            --region ${REGION}
+
+          aws elasticbeanstalk update-environment \
+            --environment-name "$EB_ENV_NAME" \
+            --version-label "$VERSION_LABEL" \
+            --region ${REGION}
+
+          echo "Waiting for Elastic Beanstalk environment update to complete..."
+          aws elasticbeanstalk wait environment-updated --environment-name "$EB_ENV_NAME" --region ${REGION}
+
+          CNAME=$(aws elasticbeanstalk describe-environments \
+            --environment-names "$EB_ENV_NAME" \
+            --region ${REGION} \
+            --query "Environments[0].CNAME" \
+            --output text)
+
+          HEALTH=$(aws elasticbeanstalk describe-environments \
+            --environment-names "$EB_ENV_NAME" \
+            --region ${REGION} \
+            --query "Environments[0].Health" \
+            --output text)
+
+          if [ -z "$CNAME" ] || [ "$CNAME" = "None" ]; then
+            echo "::error::Elastic Beanstalk environment did not return a valid CNAME endpoint."
+            exit 1
           fi
+
+          if [ "$HEALTH" = "Red" ]; then
+            echo "::error::Elastic Beanstalk environment health is RED following deployment update."
+            exit 1
+          fi
+
+          echo "eb_app_url=http://${CNAME}" >> "$GITHUB_OUTPUT"
+          echo "Elastic Beanstalk successfully deployed at: http://${CNAME} (Health: ${HEALTH})"
 
   post-deploy-verify:
     name: Run Post-Deployment Smoke Tests
     needs: [deploy-infrastructure, deploy-application]
-    if: needs.pre-deploy-check.outputs.has_aws_role == 'true'
+    if: needs.pre-deploy-check.outputs.deployment_mode == 'DEPLOY'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -236,9 +286,9 @@ jobs:
         env:
           TARGET_URL: ${{ secrets.DEPLOYMENT_URL || needs.deploy-application.outputs.eb_app_url || needs.deploy-infrastructure.outputs.serverless_api_url }}
         run: |
-          if [ -n "$TARGET_URL" ] && [ "$TARGET_URL" != "None" ]; then
-            echo "Running deployment smoke tests against target: ${TARGET_URL}"
-            python3 scripts/smoke_test.py --base-url "$TARGET_URL"
-          else
-            echo "No live target URL available (neither EB nor Serverless API endpoint set); skipping smoke test execution."
+          if [ -z "$TARGET_URL" ] || [ "$TARGET_URL" = "None" ]; then
+            echo "::error::No live endpoint URL resolved (DEPLOYMENT_URL, EB CNAME, or API Gateway URL). Cannot verify deployment."
+            exit 1
           fi
+          echo "Running deployment smoke tests against target: ${TARGET_URL}"
+          python3 scripts/smoke_test.py --base-url "$TARGET_URL"

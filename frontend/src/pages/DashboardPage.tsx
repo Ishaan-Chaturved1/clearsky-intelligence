@@ -108,16 +108,16 @@ export const DashboardPage: React.FC = () => {
   const latestReading = selectedZone?.latest_reading;
   const weather = latestReading?.weather;
 
-  const rainfall = weather?.precipitation_mmh ?? 0;
-  const humidity = weather?.relative_humidity ?? 84;
-  const temperature = weather?.temperature_c ?? 23;
+  const rainfall = weather?.precipitation_mmh ?? null;
+  const humidity = weather?.relative_humidity ?? null;
+  const temperature = weather?.temperature_c ?? null;
   const aqiValue =
     latestReading?.pm25?.value !== null && latestReading?.pm25?.value !== undefined
       ? Math.round(latestReading.pm25.value)
-      : 42;
-  const windSpeedKmh = weather?.wind_speed_kmh ?? 7.5;
-  const windDirectionDeg = weather?.wind_direction_deg ?? 45;
-  const boundaryLayer = weather?.boundary_layer_height_m ?? 450;
+      : null;
+  const windSpeedKmh = weather?.wind_speed_kmh ?? null;
+  const windDirectionDeg = weather?.wind_direction_deg ?? null;
+  const boundaryLayer = weather?.boundary_layer_height_m ?? null;
 
   const centerCoords: [number, number] = customCoords
     ? customCoords
@@ -153,13 +153,15 @@ export const DashboardPage: React.FC = () => {
             {/* 1. Pollution Trend Analysis (Bottom-Left Card - 5 columns) */}
             <div className={`xl:col-span-5 h-full pointer-events-auto transition-all ${elevatedTile === 'trend' ? 'relative z-[560]' : 'relative z-[130]'}`}>
               <PollutionTrendChart
-                currentAqi={aqiValue}
+                currentAqi={aqiValue ?? undefined}
                 currentSeverity={
-                  aqiValue > 100
-                    ? 'High Pollution'
-                    : aqiValue > 50
-                      ? 'Moderate Pollution'
-                      : 'Good Air Quality'
+                  aqiValue !== null
+                    ? aqiValue > 100
+                      ? 'High Pollution'
+                      : aqiValue > 50
+                        ? 'Moderate Pollution'
+                        : 'Good Air Quality'
+                    : 'Awaiting Observation'
                 }
                 isElevated={elevatedTile === 'trend'}
                 onClick={() => setElevatedTile(elevatedTile === 'trend' ? null : 'trend')}

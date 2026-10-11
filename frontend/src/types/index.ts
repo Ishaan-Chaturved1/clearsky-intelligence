@@ -666,3 +666,104 @@ export interface InvestigationAnalyzeParams {
   reference_time?: string;
 }
 
+export type VerificationStatus =
+  | 'HEALTHY'
+  | 'DEGRADED'
+  | 'STALE'
+  | 'EMPTY'
+  | 'MISCONFIGURED'
+  | 'UNAVAILABLE'
+  | 'RATE_LIMITED'
+  | 'ERROR'
+  | 'NOT_CHECKED'
+  | 'NOT_APPLICABLE';
+
+export interface SourceVerificationResult {
+  source_id: string;
+  source_name: string;
+  status: VerificationStatus;
+  checked_at: string;
+  last_attempt_at: string;
+  last_successful_fetch_at?: string | null;
+  latest_observation_at?: string | null;
+  response_time_ms?: number | null;
+  http_status?: number | null;
+  records_received: number;
+  records_valid: number;
+  records_rejected: number;
+  expected_fields: string[];
+  missing_fields: string[];
+  missing_value_counts: Record<string, number>;
+  unique_station_count?: number | null;
+  geographic_coverage?: string | null;
+  temporal_coverage?: string | null;
+  cache_age_seconds?: number | null;
+  freshness_threshold_seconds: number;
+  data_quality_score?: number | null;
+  errors: string[];
+  warnings: string[];
+  retry_count: number;
+  provenance: string;
+  verification_method: string;
+  limitations: string[];
+}
+
+export interface DataHealthSummary {
+  total_registered_sources: number;
+  total_checked: number;
+  healthy_count: number;
+  degraded_count: number;
+  stale_count: number;
+  empty_count: number;
+  misconfigured_count: number;
+  unavailable_count: number;
+  rate_limited_count: number;
+  error_count: number;
+  not_checked_count: number;
+  datasets_with_missing_required_fields: number;
+  datasets_with_insufficient_coverage: number;
+  most_recent_successful_fetch?: string | null;
+  overall_status: VerificationStatus;
+  recommended_actions: string[];
+  verification_mode: string;
+  results: SourceVerificationResult[];
+}
+
+export interface DataSourceMetadata {
+  source_id: string;
+  source_name: string;
+  data_category: string;
+  provider_type: string;
+  description: string;
+  required_config: string[];
+  optional_config: string[];
+  geographical_coverage: string;
+  supported_fields: string[];
+  expected_update_frequency_seconds: number;
+  freshness_threshold_seconds: number;
+  request_timeout_seconds: number;
+  rate_limit_behavior: string;
+  cache_ttl_seconds: number;
+  is_required: boolean;
+  is_verifiable: boolean;
+  limitations: string[];
+}
+
+export interface InvestigationReadinessReport {
+  investigation_id: string;
+  investigation_type: string;
+  required_evidence_categories: string[];
+  available_evidence_categories: string[];
+  missing_evidence_categories: string[];
+  stale_evidence_categories: string[];
+  failed_data_sources: string[];
+  geographic_coverage_limitations: string[];
+  temporal_coverage_limitations: string[];
+  transport_analysis_possible: boolean;
+  quantitative_attribution_defensible: boolean;
+  readiness_score: number;
+  readiness_verdict: string;
+  additional_data_needed: string[];
+  generated_at: string;
+}
+

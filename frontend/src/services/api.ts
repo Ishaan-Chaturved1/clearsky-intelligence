@@ -23,7 +23,10 @@ import {
   InvestigationAnalyzeParams,
   LocalSourceInvestigationResult,
   TransportAssessment,
-  SatelliteFireCorrelationResult
+  SatelliteFireCorrelationResult,
+  DataHealthSummary,
+  SourceVerificationResult,
+  DataSourceMetadata
 } from '../types';
 
 const API_BASE = '/api';
@@ -212,5 +215,21 @@ export const api = {
       contradicting_evidence_count: number;
       confidence_assessment: string;
       generated_at: string;
-    }>>(`${API_BASE}/investigation/dossiers`)
+    }>>(`${API_BASE}/investigation/dossiers`),
+
+  getDataHealth: () => fetchJson<DataHealthSummary>(`${API_BASE}/data-health`),
+
+  getDataHealthSources: () => fetchJson<DataSourceMetadata[]>(`${API_BASE}/data-health/sources`),
+
+  getSourceHealthDetail: (sourceId: string) =>
+    fetchJson<SourceVerificationResult>(`${API_BASE}/data-health/sources/${encodeURIComponent(sourceId)}`),
+
+  runLiveCheck: (sourceId?: string) =>
+    fetchJson<DataHealthSummary | SourceVerificationResult>(
+      `${API_BASE}/data-health/check${sourceId ? `?source_id=${encodeURIComponent(sourceId)}` : ''}`,
+      { method: 'POST' }
+    ),
+
+  runStoredDataAudit: () =>
+    fetchJson<DataHealthSummary>(`${API_BASE}/data-health/audit`, { method: 'POST' })
 };

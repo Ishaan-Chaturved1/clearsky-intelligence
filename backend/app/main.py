@@ -17,6 +17,7 @@ from app.core.config import settings, BASE_DIR
 from app.core.logging import logger
 from app.api.endpoints import router as api_router
 from app.api.investigation_endpoints import router as investigation_router
+from app.api.data_health_endpoints import router as data_health_router
 from app.repositories.local_repository import SQLiteRepository
 
 @asynccontextmanager
@@ -70,6 +71,7 @@ app.add_middleware(
 
 app.include_router(api_router, prefix="/api")
 app.include_router(investigation_router, prefix="/api")
+app.include_router(data_health_router, prefix="/api")
 
 @app.get("/")
 def read_root():

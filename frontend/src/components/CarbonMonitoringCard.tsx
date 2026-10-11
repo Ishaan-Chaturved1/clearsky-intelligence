@@ -19,7 +19,7 @@ interface CarbonMonitoringCardProps {
 }
 
 export const CarbonMonitoringCard: React.FC<CarbonMonitoringCardProps> = ({
-  netCarbonOffset = '101,850,000 Ton Co2e',
+  netCarbonOffset = 'Baseline (Telemetry Pending)',
   waterSavedLiters,
   className = '',
   isElevated = false,

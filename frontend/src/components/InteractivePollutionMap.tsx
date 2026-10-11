@@ -122,10 +122,10 @@ export const InteractivePollutionMap: React.FC<InteractivePollutionMapProps> = (
   stations = [],
   onMapClick,
   selectedLocationName,
-  rainfallMm = 0,
-  humidityPercent = 84,
-  temperatureC = 23,
-  aqiOrPm25 = 5,
+  rainfallMm = null,
+  humidityPercent = null,
+  temperatureC = null,
+  aqiOrPm25 = null,
   children,
 }) => {
   const [showContours, setShowContours] = useState(true);
