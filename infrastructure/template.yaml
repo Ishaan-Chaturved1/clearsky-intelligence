@@ -59,6 +59,8 @@ Resources:
   # ==========================================
   ZonesTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "clearsky-zones-${Environment}"
       BillingMode: PAY_PER_REQUEST
@@ -71,6 +73,8 @@ Resources:
 
   ReadingsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "clearsky-readings-${Environment}"
       BillingMode: PAY_PER_REQUEST
@@ -90,6 +94,8 @@ Resources:
 
   DecisionsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "clearsky-decisions-${Environment}"
       BillingMode: PAY_PER_REQUEST
@@ -106,6 +112,8 @@ Resources:
 
   AlertsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "clearsky-alerts-${Environment}"
       BillingMode: PAY_PER_REQUEST
@@ -122,6 +130,8 @@ Resources:
 
   EventsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "clearsky-events-${Environment}"
       BillingMode: PAY_PER_REQUEST
@@ -138,6 +148,8 @@ Resources:
 
   InvestigationsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "clearsky-investigations-${Environment}"
       BillingMode: PAY_PER_REQUEST
@@ -153,6 +165,8 @@ Resources:
   # ==========================================
   DataLakeBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       BucketName: !Sub "clearsky-data-lake-${Environment}-${AWS::AccountId}"
       BucketEncryption:

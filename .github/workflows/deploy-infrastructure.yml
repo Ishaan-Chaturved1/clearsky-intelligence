@@ -1,0 +1,117 @@
+name: Deploy Infrastructure — AWS SAM
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: 'Target Deployment Environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+
+  push:
+    branches: [ main ]
+    paths:
+      - 'infrastructure/template.yaml'
+
+concurrency:
+  group: deploy-infrastructure-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  REGION: us-east-1
+  TARGET_ENV: ${{ github.event.inputs.target_environment || 'production' }}
+
+jobs:
+  validate-and-deploy:
+    name: Validate, Build & Deploy Serverless Stack
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    outputs:
+      http_api_url: ${{ steps.sam-deploy.outputs.http_api_url }}
+      data_lake_bucket: ${{ steps.sam-deploy.outputs.data_lake_bucket }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.REGION }}
+
+      - name: Verify AWS Identity & Account ID
+        env:
+          EXPECTED_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+        run: |
+          CALLER_ACCOUNT=$(aws sts get-caller-identity --query "Account" --output text)
+          echo "Authenticated to AWS Account: ${CALLER_ACCOUNT}"
+          if [ -n "$EXPECTED_ACCOUNT_ID" ] && [ "$CALLER_ACCOUNT" != "$EXPECTED_ACCOUNT_ID" ]; then
+            echo "::error::Account mismatch! Current account ${CALLER_ACCOUNT} does not match expected ${EXPECTED_ACCOUNT_ID}."
+            exit 1
+          fi
+
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Validate SAM Template
+        run: |
+          sam validate --template-file infrastructure/template.yaml
+
+      - name: Build SAM Infrastructure Stack
+        run: |
+          sam build --template-file infrastructure/template.yaml --use-container
+
+      - name: Deploy Serverless Infrastructure
+        id: sam-deploy
+        env:
+          STACK_NAME: clearsky-serverless-${{ env.TARGET_ENV }}
+          OPENAQ_KEY: ${{ secrets.OPENAQ_API_KEY }}
+          FIRMS_KEY: ${{ secrets.NASA_FIRMS_MAP_KEY }}
+          CPCB_KEY: ${{ secrets.DATA_GOV_IN_API_KEY }}
+        run: |
+          echo "Deploying SAM stack: ${STACK_NAME} to region ${REGION}"
+          sam deploy \
+            --template-file .aws-sam/build/template.yaml \
+            --stack-name "${STACK_NAME}" \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --region "${REGION}" \
+            --parameter-overrides \
+                Environment="${TARGET_ENV}" \
+                OpenAQApiKey="${OPENAQ_KEY}" \
+                NasaFirmsMapKey="${FIRMS_KEY}" \
+                CpcbDataGovApiKey="${CPCB_KEY}"
+
+          API_URL=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='HttpApiUrl'].OutputValue" \
+            --output text)
+
+          BUCKET_NAME=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='DataLakeBucketName'].OutputValue" \
+            --output text)
+
+          echo "http_api_url=${API_URL}" >> "$GITHUB_OUTPUT"
+          echo "data_lake_bucket=${BUCKET_NAME}" >> "$GITHUB_OUTPUT"
+
+          echo "### 🚀 SAM Infrastructure Deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Stack Name**: \`${STACK_NAME}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **HTTP API URL**: \`${API_URL}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Data Lake Bucket**: \`${BUCKET_NAME}\`" >> "$GITHUB_STEP_SUMMARY"

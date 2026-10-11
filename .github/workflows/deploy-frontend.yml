@@ -1,21 +1,22 @@
-name: Deploy Frontend — Build & Sync
-# Deploys ONLY the React/Vite frontend.
-# Builds from source and either:
-#   - Syncs to S3 (if S3_FRONTEND_BUCKET secret is set), OR
-#   - Packages into a standalone EB bundle with only the updated dist/
-# Does NOT redeploy the backend or touch SAM infrastructure.
+name: Deploy Frontend — Build & S3 / CloudFront
 
 on:
   workflow_dispatch:
     inputs:
       target_environment:
-        description: 'Deployment Environment'
+        description: 'Target Deployment Environment'
         required: true
         default: 'production'
         type: choice
         options:
-          - staging
           - production
+          - staging
+          - development
+      api_base_url:
+        description: 'Backend API Base URL (leave empty to use existing secret/default)'
+        required: false
+        default: ''
+        type: string
 
   push:
     branches: [ main ]
@@ -34,72 +35,68 @@ env:
   TARGET_ENV: ${{ github.event.inputs.target_environment || 'production' }}
 
 jobs:
-  # ──────────────────────────────────────────────────────────────────────────
-  # 1. Build the React/Vite frontend
-  # ──────────────────────────────────────────────────────────────────────────
   build:
-    name: Build Frontend
+    name: Build React/Vite Frontend
     runs-on: ubuntu-latest
 
     defaults:
       run:
         working-directory: ./frontend
 
-    outputs:
-      artifact_name: ${{ steps.meta.outputs.artifact_name }}
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install Dependencies
+      - name: Install Frontend Dependencies
         run: npm ci
 
-      - name: TypeScript Check & Production Build
-        run: npm run build
-
-      - name: Set Artifact Metadata
-        id: meta
+      - name: Run TypeScript Check & Production Build
+        env:
+          VITE_API_BASE_URL: ${{ github.event.inputs.api_base_url || secrets.VITE_API_BASE_URL || secrets.DEPLOYMENT_URL || '' }}
         run: |
-          NAME="frontend-dist-${{ github.sha }}"
-          echo "artifact_name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "Building frontend with VITE_API_BASE_URL: ${VITE_API_BASE_URL:-[relative /api]}"
+          npm run build
 
-      - name: Upload Frontend Build Artifact
+      - name: Upload Frontend Artifact
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist-${{ github.sha }}
           path: frontend/dist/
           retention-days: 7
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # 2a. Deploy: sync dist to S3 (preferred for standalone SPA hosting)
-  #     Runs when S3_FRONTEND_BUCKET secret is configured.
-  # ──────────────────────────────────────────────────────────────────────────
   deploy-s3:
-    name: Sync to S3 (Static Hosting)
+    name: Deploy to S3 Static Hosting
     runs-on: ubuntu-latest
     needs: [build]
     environment: production
     permissions:
-      id-token: write
       contents: read
-    # Only run if both AWS credentials and a dedicated frontend bucket are set
-    if: ${{ secrets.S3_FRONTEND_BUCKET != '' && secrets.AWS_DEPLOY_ROLE_ARN != '' }}
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS via OIDC
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.REGION }}
-          audience: sts.amazonaws.com
+
+      - name: Verify AWS Identity & Account ID
+        env:
+          EXPECTED_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+        run: |
+          CALLER_ACCOUNT=$(aws sts get-caller-identity --query "Account" --output text)
+          echo "Authenticated to AWS Account: ${CALLER_ACCOUNT}"
+          if [ -n "$EXPECTED_ACCOUNT_ID" ] && [ "$CALLER_ACCOUNT" != "$EXPECTED_ACCOUNT_ID" ]; then
+            echo "::error::Account mismatch! Current account ${CALLER_ACCOUNT} does not match expected ${EXPECTED_ACCOUNT_ID}."
+            exit 1
+          fi
 
       - name: Download Frontend Build
         uses: actions/download-artifact@v4
@@ -107,126 +104,46 @@ jobs:
           name: frontend-dist-${{ github.sha }}
           path: frontend-dist/
 
-      - name: Sync to S3
+      - name: Sync Static Assets to Dedicated S3 Bucket
         env:
-          BUCKET: ${{ secrets.S3_FRONTEND_BUCKET }}
+          ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+          CUSTOM_BUCKET: ${{ secrets.S3_FRONTEND_BUCKET }}
         run: |
-          echo "Syncing frontend/dist to s3://${BUCKET}/"
+          BUCKET="${CUSTOM_BUCKET:-clearsky-frontend-${TARGET_ENV}-${ACCOUNT_ID}}"
+          echo "Deploying frontend to S3 bucket: ${BUCKET}"
+
+          # Ensure bucket exists and has versioning enabled
+          if ! aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null; then
+            echo "Bucket ${BUCKET} not found. Creating..."
+            aws s3 mb "s3://${BUCKET}" --region "${REGION}"
+            aws s3api put-bucket-versioning --bucket "${BUCKET}" --versioning-configuration Status=Enabled
+            aws s3api put-bucket-encryption --bucket "${BUCKET}" \
+              --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+            aws s3 website "s3://${BUCKET}" --index-document index.html --error-document index.html
+          fi
+
+          echo "Syncing hashed static assets with immutable cache header..."
           aws s3 sync frontend-dist/ "s3://${BUCKET}/" \
             --delete \
             --cache-control "max-age=31536000,immutable" \
             --exclude "index.html" \
             --region "${REGION}"
 
-          # index.html must not be cached
+          echo "Uploading index.html with no-cache header for SPA routing..."
           aws s3 cp frontend-dist/index.html "s3://${BUCKET}/index.html" \
             --cache-control "no-cache,no-store,must-revalidate" \
+            --content-type "text/html" \
             --region "${REGION}"
 
-          echo "Frontend sync complete → s3://${BUCKET}/"
+          echo "Frontend successfully synced to s3://${BUCKET}/"
 
-      - name: Invalidate CloudFront (if configured)
+      - name: Invalidate CloudFront Cache (if configured)
         env:
-          CF_DISTRIBUTION_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
-        if: ${{ env.CF_DISTRIBUTION_ID != '' }}
+          CF_DIST_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+        if: ${{ env.CF_DIST_ID != '' }}
         run: |
+          echo "Invalidating CloudFront distribution ${CF_DIST_ID}..."
           aws cloudfront create-invalidation \
-            --distribution-id "${CF_DISTRIBUTION_ID}" \
+            --distribution-id "${CF_DIST_ID}" \
             --paths "/*"
-          echo "CloudFront invalidation triggered."
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # 2b. Deploy: bundle dist into EB zip and deploy (fallback when no S3 SPA
-  #     bucket is configured — the FastAPI backend serves the SPA directly)
-  # ──────────────────────────────────────────────────────────────────────────
-  deploy-eb-frontend:
-    name: Bundle dist into EB Deployment
-    runs-on: ubuntu-latest
-    needs: [build]
-    environment: production
-    permissions:
-      id-token: write
-      contents: read
-    # Runs when S3_FRONTEND_BUCKET is NOT set (EB serves the SPA via FastAPI)
-    if: ${{ secrets.S3_FRONTEND_BUCKET == '' && secrets.AWS_DEPLOY_ROLE_ARN != '' }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.REGION }}
-          audience: sts.amazonaws.com
-
-      - name: Download Frontend Build
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist-${{ github.sha }}
-          path: frontend/dist/
-
-      - name: Validate EB Secrets
-        env:
-          EB_APP_NAME: ${{ secrets.EB_APP_NAME }}
-          EB_ENV_NAME: ${{ secrets.EB_ENV_NAME }}
-          S3_DEPLOY_BUCKET: ${{ secrets.S3_DEPLOY_BUCKET }}
-        run: |
-          missing=""
-          [ -z "$EB_APP_NAME" ]      && missing="$missing EB_APP_NAME"
-          [ -z "$EB_ENV_NAME" ]      && missing="$missing EB_ENV_NAME"
-          [ -z "$S3_DEPLOY_BUCKET" ] && missing="$missing S3_DEPLOY_BUCKET"
-          if [ -n "$missing" ]; then
-            echo "::error::Missing required secrets:${missing}"
-            exit 1
-          fi
-
-      - name: Package Backend + Frontend Bundle
-        run: |
-          VERSION_LABEL="frontend-${TARGET_ENV}-$(date +%Y%m%d%H%M%S)-${{ github.sha }}"
-          echo "VERSION_LABEL=${VERSION_LABEL}" >> "$GITHUB_ENV"
-
-          zip -r clearsky-deploy.zip \
-            application.py \
-            Procfile \
-            requirements.txt \
-            backend \
-            data \
-            frontend/dist \
-            .ebextensions \
-            -x "*__pycache__*" -x "*.pyc" -x "*.pytest_cache*" \
-               -x "data/test_s3_lake/*" -x "data/s3_lake/*"
-          echo "Bundle size: $(du -sh clearsky-deploy.zip | cut -f1)"
-
-      - name: Upload to S3 & Deploy to EB
-        env:
-          EB_APP_NAME: ${{ secrets.EB_APP_NAME }}
-          EB_ENV_NAME: ${{ secrets.EB_ENV_NAME }}
-          S3_DEPLOY_BUCKET: ${{ secrets.S3_DEPLOY_BUCKET }}
-        run: |
-          S3_KEY="clearsky/${VERSION_LABEL}.zip"
-          aws s3 cp clearsky-deploy.zip "s3://${S3_DEPLOY_BUCKET}/${S3_KEY}" --region "${REGION}"
-
-          aws elasticbeanstalk create-application-version \
-            --application-name "${EB_APP_NAME}" \
-            --version-label "${VERSION_LABEL}" \
-            --source-bundle S3Bucket="${S3_DEPLOY_BUCKET}",S3Key="${S3_KEY}" \
-            --region "${REGION}"
-
-          aws elasticbeanstalk update-environment \
-            --environment-name "${EB_ENV_NAME}" \
-            --version-label "${VERSION_LABEL}" \
-            --region "${REGION}"
-
-          echo "Waiting for EB environment update..."
-          aws elasticbeanstalk wait environment-updated \
-            --environment-name "${EB_ENV_NAME}" \
-            --region "${REGION}"
-
-          CNAME=$(aws elasticbeanstalk describe-environments \
-            --environment-names "${EB_ENV_NAME}" \
-            --region "${REGION}" \
-            --query "Environments[0].CNAME" \
-            --output text)
-
-          echo "Frontend deployed to EB: http://${CNAME}"
+          echo "CloudFront invalidation submitted."

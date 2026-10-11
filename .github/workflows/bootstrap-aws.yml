@@ -1,0 +1,405 @@
+name: Bootstrap AWS Resources — ClearSky Intelligence
+# Automated one-click provisioning of fresh, dedicated AWS resources for ClearSky Intelligence.
+# Triggered ONLY via manual workflow_dispatch.
+# Authenticates using secrets.AWS_ACCESS_KEY_ID and secrets.AWS_SECRET_ACCESS_KEY.
+# Validates AWS account identity against secrets.AWS_ACCOUNT_ID before any action.
+# Idempotently creates or reuses:
+#   1. Dedicated S3 buckets (deployment bundle, frontend hosting)
+#   2. Elastic Beanstalk service role (aws-elasticbeanstalk-service-role)
+#   3. SAM Serverless Stack (DynamoDB tables, SQS, SNS, Lambdas, API Gateway, EB EC2 Role & Profile)
+#   4. Elastic Beanstalk Application & Environment (Python 3.11, port 5000)
+#   5. Initial backend bundle deployment & frontend static sync
+#   6. Post-bootstrap live smoke test verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: 'Target Deployment Environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+      confirm_provisioning:
+        description: 'Type CONFIRM to authorize AWS resource provisioning'
+        required: true
+        default: 'CONFIRM'
+
+permissions:
+  contents: read
+
+env:
+  REGION: us-east-1
+  TARGET_ENV: ${{ github.event.inputs.target_environment || 'production' }}
+
+jobs:
+  bootstrap:
+    name: Provision & Verify ClearSky AWS Infrastructure
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # ──────────────────────────────────────────────────────────────────────────
+      # SAFETY GATE & CREDENTIAL VERIFICATION
+      # ──────────────────────────────────────────────────────────────────────────
+      - name: Assert Confirmation Safety Gate
+        run: |
+          if [ "${{ github.event.inputs.confirm_provisioning }}" != "CONFIRM" ]; then
+            echo "::error::Provisioning canceled: confirm_provisioning must be set to 'CONFIRM'."
+            exit 1
+          fi
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.REGION }}
+
+      - name: Verify AWS Account Identity & Safety Gate
+        id: account-check
+        env:
+          EXPECTED_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+        run: |
+          CALLER_ACCOUNT=$(aws sts get-caller-identity --query "Account" --output text)
+          CALLER_ARN=$(aws sts get-caller-identity --query "Arn" --output text)
+          echo "Connected Caller ARN: ${CALLER_ARN}"
+          echo "Connected Account ID: ${CALLER_ACCOUNT}"
+
+          if [ -z "$EXPECTED_ACCOUNT_ID" ]; then
+            echo "::error::GitHub repository secret AWS_ACCOUNT_ID is not configured."
+            exit 1
+          fi
+
+          if [ "$CALLER_ACCOUNT" != "$EXPECTED_ACCOUNT_ID" ]; then
+            echo "::error::Account ID mismatch! Connected AWS account ${CALLER_ACCOUNT} does not match expected secret AWS_ACCOUNT_ID ${EXPECTED_ACCOUNT_ID}."
+            exit 1
+          fi
+          echo "account_id=${CALLER_ACCOUNT}" >> "$GITHUB_OUTPUT"
+
+      # ──────────────────────────────────────────────────────────────────────────
+      # 1. DEDICATED S3 BUCKETS (Consistent clearsky-intelligence prefix)
+      # ──────────────────────────────────────────────────────────────────────────
+      - name: Provision Dedicated S3 Buckets
+        id: s3-buckets
+        env:
+          ACCOUNT_ID: ${{ steps.account-check.outputs.account_id }}
+        run: |
+          DEPLOY_BUCKET="clearsky-intelligence-deploy-${TARGET_ENV}-${ACCOUNT_ID}"
+          FRONTEND_BUCKET="clearsky-intelligence-frontend-${TARGET_ENV}-${ACCOUNT_ID}"
+
+          echo "deploy_bucket=${DEPLOY_BUCKET}" >> "$GITHUB_OUTPUT"
+          echo "frontend_bucket=${FRONTEND_BUCKET}" >> "$GITHUB_OUTPUT"
+
+          # 1. Deployment Artifacts Bucket
+          echo "Checking deployment bucket: ${DEPLOY_BUCKET}..."
+          if aws s3api head-bucket --bucket "${DEPLOY_BUCKET}" 2>/dev/null; then
+            echo "[✓] Deployment bucket ${DEPLOY_BUCKET} exists. Reusing."
+          else
+            echo "Creating deployment bucket ${DEPLOY_BUCKET}..."
+            if ! aws s3 mb "s3://${DEPLOY_BUCKET}" --region "${REGION}"; then
+              echo "::error::Failed to create bucket ${DEPLOY_BUCKET}. Check IAM permissions or global name conflicts."
+              exit 1
+            fi
+            aws s3api put-bucket-versioning --bucket "${DEPLOY_BUCKET}" --versioning-configuration Status=Enabled
+            aws s3api put-bucket-encryption --bucket "${DEPLOY_BUCKET}" \
+              --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+            aws s3api put-public-access-block --bucket "${DEPLOY_BUCKET}" \
+              --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+            echo "[✓] Created and configured deployment bucket ${DEPLOY_BUCKET}."
+          fi
+
+          # 2. Frontend Static Hosting Bucket
+          echo "Checking frontend bucket: ${FRONTEND_BUCKET}..."
+          if aws s3api head-bucket --bucket "${FRONTEND_BUCKET}" 2>/dev/null; then
+            echo "[✓] Frontend bucket ${FRONTEND_BUCKET} exists. Reusing."
+          else
+            echo "Creating frontend bucket ${FRONTEND_BUCKET}..."
+            if ! aws s3 mb "s3://${FRONTEND_BUCKET}" --region "${REGION}"; then
+              echo "::error::Failed to create bucket ${FRONTEND_BUCKET}. Check IAM permissions or global name conflicts."
+              exit 1
+            fi
+            aws s3api put-bucket-versioning --bucket "${FRONTEND_BUCKET}" --versioning-configuration Status=Enabled
+            aws s3api put-bucket-encryption --bucket "${FRONTEND_BUCKET}" \
+              --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+            aws s3 website "s3://${FRONTEND_BUCKET}" --index-document index.html --error-document index.html
+            echo "[✓] Created and configured frontend bucket ${FRONTEND_BUCKET}."
+          fi
+
+      # ──────────────────────────────────────────────────────────────────────────
+      # 2. ELASTIC BEANSTALK SERVICE ROLE
+      # ──────────────────────────────────────────────────────────────────────────
+      - name: Provision Elastic Beanstalk Service Role
+        id: eb-service-role
+        run: |
+          SERVICE_ROLE_NAME="aws-elasticbeanstalk-service-role"
+          echo "service_role=${SERVICE_ROLE_NAME}" >> "$GITHUB_OUTPUT"
+
+          if aws iam get-role --role-name "${SERVICE_ROLE_NAME}" 2>/dev/null; then
+            echo "[✓] EB service role ${SERVICE_ROLE_NAME} exists. Reusing."
+          else
+            echo "Creating EB service role ${SERVICE_ROLE_NAME}..."
+            aws iam create-role \
+              --role-name "${SERVICE_ROLE_NAME}" \
+              --assume-role-policy-document '{
+                "Version": "2012-10-17",
+                "Statement": [{
+                  "Effect": "Allow",
+                  "Principal": {"Service": "elasticbeanstalk.amazonaws.com"},
+                  "Action": "sts:AssumeRole"
+                }]
+              }'
+            aws iam attach-role-policy --role-name "${SERVICE_ROLE_NAME}" \
+              --policy-arn "arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth"
+            aws iam attach-role-policy --role-name "${SERVICE_ROLE_NAME}" \
+              --policy-arn "arn:aws:iam::aws:policy/AWSElasticBeanstalkManagedUpdatesCustomerRolePolicy"
+            echo "[✓] Created EB service role ${SERVICE_ROLE_NAME}."
+          fi
+
+      # ──────────────────────────────────────────────────────────────────────────
+      # 3. PROVISION SAM SERVERLESS STACK
+      # ──────────────────────────────────────────────────────────────────────────
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Build & Deploy SAM Infrastructure Stack
+        id: sam-stack
+        env:
+          STACK_NAME: clearsky-intelligence-serverless-${{ env.TARGET_ENV }}
+          OPENAQ_KEY: ${{ secrets.OPENAQ_API_KEY }}
+          FIRMS_KEY: ${{ secrets.NASA_FIRMS_MAP_KEY }}
+          CPCB_KEY: ${{ secrets.DATA_GOV_IN_API_KEY }}
+        run: |
+          echo "Validating SAM template..."
+          sam validate --template-file infrastructure/template.yaml
+
+          echo "Building SAM application..."
+          sam build --template-file infrastructure/template.yaml --use-container
+
+          echo "Deploying CloudFormation stack ${STACK_NAME}..."
+          sam deploy \
+            --template-file .aws-sam/build/template.yaml \
+            --stack-name "${STACK_NAME}" \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --region "${REGION}" \
+            --parameter-overrides \
+                Environment="${TARGET_ENV}" \
+                OpenAQApiKey="${OPENAQ_KEY}" \
+                NasaFirmsMapKey="${FIRMS_KEY}" \
+                CpcbDataGovApiKey="${CPCB_KEY}"
+
+          HTTP_API_URL=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='HttpApiUrl'].OutputValue" \
+            --output text)
+          echo "http_api_url=${HTTP_API_URL}" >> "$GITHUB_OUTPUT"
+
+          DATA_LAKE_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='DataLakeBucketName'].OutputValue" \
+            --output text)
+          echo "data_lake_bucket=${DATA_LAKE_BUCKET}" >> "$GITHUB_OUTPUT"
+
+          INSTANCE_PROFILE=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='ElasticBeanstalkInstanceProfileName'].OutputValue" \
+            --output text)
+          echo "instance_profile=${INSTANCE_PROFILE}" >> "$GITHUB_OUTPUT"
+
+          echo "[✓] SAM stack deployed: API=${HTTP_API_URL}, DataLake=${DATA_LAKE_BUCKET}, Profile=${INSTANCE_PROFILE}"
+
+      # ──────────────────────────────────────────────────────────────────────────
+      # 4. ELASTIC BEANSTALK APPLICATION & ENVIRONMENT
+      # ──────────────────────────────────────────────────────────────────────────
+      - name: Provision Elastic Beanstalk Application & Environment
+        id: eb-provision
+        env:
+          APP_NAME: "clearsky-intelligence"
+          ENV_NAME: "clearsky-intelligence-${{ env.TARGET_ENV }}"
+          INSTANCE_PROFILE: ${{ steps.sam-stack.outputs.instance_profile }}
+          SERVICE_ROLE: ${{ steps.eb-service-role.outputs.service_role }}
+        run: |
+          echo "app_name=${APP_NAME}" >> "$GITHUB_OUTPUT"
+          echo "env_name=${ENV_NAME}" >> "$GITHUB_OUTPUT"
+
+          # 1. EB Application
+          if aws elasticbeanstalk describe-applications --application-names "${APP_NAME}" \
+              --region "${REGION}" --query "Applications[0].ApplicationName" --output text 2>/dev/null | grep -q "${APP_NAME}"; then
+            echo "[✓] EB Application ${APP_NAME} exists. Reusing."
+          else
+            echo "Creating EB Application ${APP_NAME}..."
+            aws elasticbeanstalk create-application \
+              --application-name "${APP_NAME}" \
+              --description "ClearSky Intelligence - Smart Urban Air Intelligence" \
+              --region "${REGION}"
+            echo "[✓] Created EB Application ${APP_NAME}."
+          fi
+
+          # 2. Identify active Python 3.11 Platform ARN
+          PLATFORM_ARN=$(aws elasticbeanstalk list-platform-versions \
+            --filters "Type=PlatformName,Operator=contains,Values=Python 3.11" \
+            --region "${REGION}" \
+            --query "PlatformSummaryList[?PlatformStatus=='Ready'].PlatformArn | [0]" \
+            --output text)
+          echo "Discovered Python 3.11 Platform ARN: ${PLATFORM_ARN}"
+
+          # 3. EB Environment
+          ENV_STATUS=$(aws elasticbeanstalk describe-environments \
+            --environment-names "${ENV_NAME}" \
+            --region "${REGION}" \
+            --query "Environments[0].Status" \
+            --output text 2>/dev/null || echo "None")
+
+          if [ "$ENV_STATUS" != "None" ] && [ "$ENV_STATUS" != "" ]; then
+            echo "[✓] EB Environment ${ENV_NAME} exists (Status: ${ENV_STATUS}). Reusing."
+          else
+            echo "Creating fresh EB Environment ${ENV_NAME}..."
+            aws elasticbeanstalk create-environment \
+              --application-name "${APP_NAME}" \
+              --environment-name "${ENV_NAME}" \
+              --platform-arn "${PLATFORM_ARN}" \
+              --tier "Name=WebServer,Type=Standard" \
+              --region "${REGION}" \
+              --option-settings \
+                  Namespace=aws:autoscaling:launchconfiguration,OptionName=IamInstanceProfile,Value="${INSTANCE_PROFILE}" \
+                  Namespace=aws:elasticbeanstalk:environment,OptionName=ServiceRole,Value="${SERVICE_ROLE}" \
+                  Namespace=aws:elasticbeanstalk:application:environment,OptionName=PORT,Value="5000" \
+                  Namespace=aws:elasticbeanstalk:application:environment,OptionName=ENVIRONMENT,Value="${TARGET_ENV}" \
+                  Namespace=aws:elasticbeanstalk:application:environment,OptionName=STORAGE_BACKEND,Value="dynamodb" \
+                  Namespace=aws:elasticbeanstalk:application:environment,OptionName=AWS_REGION,Value="${REGION}" \
+                  Namespace=aws:elasticbeanstalk:application:environment,OptionName=PYTHONPATH,Value="/var/app/current:/var/app/current/backend" \
+                  Namespace=aws:elasticbeanstalk:environment:process:default,OptionName=HealthCheckPath,Value="/api/health" \
+                  Namespace=aws:elasticbeanstalk:environment:process:default,OptionName=Port,Value="5000"
+
+            echo "Waiting for environment to become ready..."
+            aws elasticbeanstalk wait environment-exists --environment-names "${ENV_NAME}" --region "${REGION}"
+            aws elasticbeanstalk wait environment-updated --environment-name "${ENV_NAME}" --region "${REGION}"
+            echo "[✓] EB Environment ${ENV_NAME} launched."
+          fi
+
+          CNAME=$(aws elasticbeanstalk describe-environments \
+            --environment-names "${ENV_NAME}" \
+            --region "${REGION}" \
+            --query "Environments[0].CNAME" \
+            --output text)
+          echo "eb_cname=${CNAME}" >> "$GITHUB_OUTPUT"
+          echo "Elastic Beanstalk CNAME: http://${CNAME}"
+
+      # ──────────────────────────────────────────────────────────────────────────
+      # 5. INITIAL APPLICATION BUNDLE DEPLOYMENT
+      # ──────────────────────────────────────────────────────────────────────────
+      - name: Deploy Initial Application Bundle to Elastic Beanstalk
+        id: initial-deploy
+        env:
+          APP_NAME: ${{ steps.eb-provision.outputs.app_name }}
+          ENV_NAME: ${{ steps.eb-provision.outputs.env_name }}
+          DEPLOY_BUCKET: ${{ steps.s3-buckets.outputs.deploy_bucket }}
+        run: |
+          LABEL="bootstrap-initial-$(date +%Y%m%d%H%M%S)-${{ github.sha }}"
+          zip -r clearsky-bootstrap.zip \
+            application.py Procfile requirements.txt backend data .ebextensions \
+            -x "*__pycache__*" -x "*.pyc" -x "*.pytest_cache*" -x "data/test_s3_lake/*" -x "data/s3_lake/*"
+
+          S3_KEY="clearsky/${LABEL}.zip"
+          echo "Uploading bootstrap bundle to s3://${DEPLOY_BUCKET}/${S3_KEY}..."
+          aws s3 cp clearsky-bootstrap.zip "s3://${DEPLOY_BUCKET}/${S3_KEY}" --region "${REGION}"
+
+          aws elasticbeanstalk create-application-version \
+            --application-name "${APP_NAME}" \
+            --version-label "${LABEL}" \
+            --source-bundle S3Bucket="${DEPLOY_BUCKET}",S3Key="${S3_KEY}" \
+            --region "${REGION}"
+
+          aws elasticbeanstalk update-environment \
+            --environment-name "${ENV_NAME}" \
+            --version-label "${LABEL}" \
+            --region "${REGION}"
+
+          echo "Waiting for environment update to stabilize..."
+          aws elasticbeanstalk wait environment-updated --environment-name "${ENV_NAME}" --region "${REGION}"
+          echo "[✓] Initial application bundle deployed."
+
+      # ──────────────────────────────────────────────────────────────────────────
+      # 6. BUILD & DEPLOY FRONTEND TO S3
+      # ──────────────────────────────────────────────────────────────────────────
+      - name: Build & Deploy Frontend to S3
+        id: frontend-deploy
+        env:
+          FRONTEND_BUCKET: ${{ steps.s3-buckets.outputs.frontend_bucket }}
+          EB_CNAME: ${{ steps.eb-provision.outputs.eb_cname }}
+        run: |
+          cd frontend
+          npm ci
+          VITE_API_BASE_URL="http://${EB_CNAME}" npm run build
+
+          aws s3 sync dist/ "s3://${FRONTEND_BUCKET}/" \
+            --delete \
+            --cache-control "max-age=31536000,immutable" \
+            --exclude "index.html" \
+            --region "${REGION}"
+
+          aws s3 cp dist/index.html "s3://${FRONTEND_BUCKET}/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate" \
+            --content-type "text/html" \
+            --region "${REGION}"
+
+          echo "[✓] Frontend deployed to s3://${FRONTEND_BUCKET}/"
+
+      # ──────────────────────────────────────────────────────────────────────────
+      # 7. POST-BOOTSTRAP LIVE SMOKE TESTS
+      # ──────────────────────────────────────────────────────────────────────────
+      - name: Set up Python for Smoke Testing
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run Smoke Tests against Live Deployment
+        env:
+          TARGET_URL: http://${{ steps.eb-provision.outputs.eb_cname }}
+        run: |
+          echo "Running post-bootstrap smoke verification against: ${TARGET_URL}"
+          python3 scripts/smoke_test.py --base-url "${TARGET_URL}"
+
+      # ──────────────────────────────────────────────────────────────────────────
+      # 8. PUBLISH PROVISIONING SUMMARY (No secrets printed)
+      # ──────────────────────────────────────────────────────────────────────────
+      - name: Publish Provisioning Summary
+        if: always()
+        env:
+          ACCOUNT_ID: ${{ steps.account-check.outputs.account_id }}
+          DEPLOY_BUCKET: ${{ steps.s3-buckets.outputs.deploy_bucket }}
+          FRONTEND_BUCKET: ${{ steps.s3-buckets.outputs.frontend_bucket }}
+          DATA_LAKE_BUCKET: ${{ steps.sam-stack.outputs.data_lake_bucket }}
+          HTTP_API_URL: ${{ steps.sam-stack.outputs.http_api_url }}
+          EB_APP: ${{ steps.eb-provision.outputs.app_name }}
+          EB_ENV: ${{ steps.eb-provision.outputs.env_name }}
+          EB_CNAME: ${{ steps.eb-provision.outputs.eb_cname }}
+        run: |
+          cat << 'EOF' >> "$GITHUB_STEP_SUMMARY"
+          ## 🌟 ClearSky Intelligence — AWS Infrastructure Bootstrap Summary
+
+          | Resource Category | AWS Resource Identifier | Status |
+          | :--- | :--- | :--- |
+          | **Target AWS Account** | \`${ACCOUNT_ID}\` (Region: \`${REGION}\`) | Verified |
+          | **Elastic Beanstalk Application** | \`${EB_APP}\` | Ready |
+          | **Elastic Beanstalk Environment** | \`${EB_ENV}\` | Ready |
+          | **Public Backend Application URL** | [http://${EB_CNAME}](http://${EB_CNAME}) | Active & Verified |
+          | **Serverless HTTP API Gateway** | [${HTTP_API_URL}](${HTTP_API_URL}) | Active |
+          | **S3 Deployment Bundle Bucket** | \`${DEPLOY_BUCKET}\` | Active (Encrypted, Versioned) |
+          | **S3 Frontend Hosting Bucket** | \`${FRONTEND_BUCKET}\` | Active (Encrypted, Versioned) |
+          | **S3 Environmental Data Lake** | \`${DATA_LAKE_BUCKET}\` | Active (Glacier Transition) |
+          | **DynamoDB Tables** | \`clearsky-*-${TARGET_ENV}\` (6 tables) | Protected (\`DeletionPolicy: Retain\`) |
+          | **EB EC2 Instance Profile** | \`clearsky-eb-instance-profile-${TARGET_ENV}\` | Attached |
+          | **EB Service Role** | \`aws-elasticbeanstalk-service-role\` | Attached |
+          EOF

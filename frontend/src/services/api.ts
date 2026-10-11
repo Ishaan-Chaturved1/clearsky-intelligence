@@ -29,7 +29,8 @@ import {
   DataSourceMetadata
 } from '../types';
 
-const API_BASE = '/api';
+const rawBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
+const API_BASE = rawBase ? `${rawBase.replace(/\/+$/, '')}/api` : '/api';
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, options);
