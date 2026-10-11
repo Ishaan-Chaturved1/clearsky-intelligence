@@ -1,0 +1,166 @@
+name: ClearSky Intelligence Continuous Deployment
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: 'Deployment Environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - staging
+          - production
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  pre-deploy-check:
+    name: Verify CI Gate & Build Artifacts
+    runs-on: ubuntu-latest
+    outputs:
+      has_aws_role: ${{ steps.check-creds.outputs.has_aws_role }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Verify Deployment Prerequisites
+        id: check-creds
+        env:
+          ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          if [ -n "$ROLE_ARN" ]; then
+            echo "has_aws_role=true" >> "$GITHUB_OUTPUT"
+            echo "AWS OIDC Role configured: $ROLE_ARN"
+          else
+            echo "has_aws_role=false" >> "$GITHUB_OUTPUT"
+            echo "AWS OIDC Role ARN secret (AWS_DEPLOY_ROLE_ARN) is not yet set in repository secrets."
+            echo "Deployment artifact packaging will proceed, but live deployment will be skipped until OIDC is provisioned."
+          fi
+
+      - name: Set up Node.js 20 & Build Frontend
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Compile Frontend Distribution
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Package Elastic Beanstalk Deployment Bundle
+        run: |
+          zip -r clearsky-deploy.zip application.py Procfile requirements.txt backend data .ebextensions
+          echo "Created deployment package: clearsky-deploy.zip"
+
+      - name: Upload Deployment Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clearsky-deployment-bundle
+          path: clearsky-deploy.zip
+          retention-days: 7
+
+  deploy-to-aws:
+    name: Deploy to AWS via OIDC
+    needs: pre-deploy-check
+    if: needs.pre-deploy-check.outputs.has_aws_role == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Configure AWS Credentials via GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          audience: sts.amazonaws.com
+
+      - name: Verify AWS Caller Identity
+        run: |
+          aws sts get-caller-identity
+
+      - name: Build Serverless Application (SAM)
+        run: |
+          sam build --template-file infrastructure/template.yaml
+
+      - name: Deploy Serverless Infrastructure Stack via SAM
+        env:
+          TARGET_ENV: ${{ github.event.inputs.target_environment || 'production' }}
+          OPENAQ_KEY: ${{ secrets.OPENAQ_API_KEY }}
+          FIRMS_KEY: ${{ secrets.NASA_FIRMS_MAP_KEY }}
+          CPCB_KEY: ${{ secrets.DATA_GOV_IN_API_KEY }}
+        run: |
+          sam deploy \
+            --template-file .aws-sam/build/template.yaml \
+            --stack-name clearsky-serverless-${TARGET_ENV} \
+            --capabilities CAPABILITY_IAM \
+            --no-fail-on-empty-changeset \
+            --region ${{ secrets.AWS_REGION || 'us-east-1' }} \
+            --parameter-overrides \
+                Environment=${TARGET_ENV} \
+                OpenAQApiKey="${OPENAQ_KEY}" \
+                NasaFirmsMapKey="${FIRMS_KEY}" \
+                CpcbDataGovApiKey="${CPCB_KEY}"
+
+          # Extract deployed HTTP API Gateway URL from CloudFormation stack outputs
+          API_URL=$(aws cloudformation describe-stacks \
+            --stack-name clearsky-serverless-${TARGET_ENV} \
+            --region ${{ secrets.AWS_REGION || 'us-east-1' }} \
+            --query "Stacks[0].Outputs[?OutputKey=='HttpApiUrl'].OutputValue" \
+            --output text || true)
+          echo "SERVERLESS_API_URL=${API_URL}" >> "$GITHUB_ENV"
+          echo "Deployed API Gateway endpoint: ${API_URL}"
+
+      - name: Download Deployment Package
+        uses: actions/download-artifact@v4
+        with:
+          name: clearsky-deployment-bundle
+
+      - name: Deploy to AWS Elastic Beanstalk (Optional Web Host)
+        env:
+          EB_APP_NAME: ${{ secrets.EB_APP_NAME }}
+          EB_ENV_NAME: ${{ secrets.EB_ENV_NAME }}
+          S3_DEPLOY_BUCKET: ${{ secrets.S3_DEPLOY_BUCKET }}
+        run: |
+          if [ -n "$EB_APP_NAME" ] && [ -n "$EB_ENV_NAME" ] && [ -n "$S3_DEPLOY_BUCKET" ]; then
+            VERSION_LABEL="deploy-$(date +%Y%m%d%H%M%S)-${{ github.sha }}"
+            echo "Uploading bundle to s3://${S3_DEPLOY_BUCKET}/clearsky/${VERSION_LABEL}.zip"
+            aws s3 cp clearsky-deploy.zip "s3://${S3_DEPLOY_BUCKET}/clearsky/${VERSION_LABEL}.zip"
+            aws elasticbeanstalk create-application-version \
+              --application-name "$EB_APP_NAME" \
+              --version-label "$VERSION_LABEL" \
+              --source-bundle S3Bucket="$S3_DEPLOY_BUCKET",S3Key="clearsky/${VERSION_LABEL}.zip"
+            aws elasticbeanstalk update-environment \
+              --environment-name "$EB_ENV_NAME" \
+              --version-label "$VERSION_LABEL"
+            echo "Triggered Elastic Beanstalk environment update."
+          else
+            echo "Elastic Beanstalk configuration not fully provided; skipping EB deployment."
+          fi
+
+      - name: Run Post-Deployment Smoke Tests
+        env:
+          TARGET_URL: ${{ secrets.DEPLOYMENT_URL || env.SERVERLESS_API_URL }}
+        run: |
+          if [ -n "$TARGET_URL" ] && [ "$TARGET_URL" != "None" ]; then
+            echo "Running deployment smoke tests against target: ${TARGET_URL}"
+            python3 scripts/smoke_test.py --base-url "$TARGET_URL"
+          else
+            echo "No live deployment target URL available; skipping smoke test execution."
+          fi

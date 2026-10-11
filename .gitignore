@@ -42,3 +42,10 @@ yarn-error.log*
 .aws-sam/
 backend/data/*.db
 data/local_storage.db
+data/alerts.json
+data/decisions.json
+data/readings.json
+data/redemptions.json
+data/s3_lake/
+data/test_s3_lake/
+clearsky-deploy.zip
