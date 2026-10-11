@@ -474,6 +474,74 @@ Resources:
           ]
         }
 
+  # ==========================================
+  # 12. ELASTIC BEANSTALK EC2 IAM INSTANCE PROFILE
+  # ==========================================
+  ElasticBeanstalkEC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "clearsky-eb-ec2-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier
+      Policies:
+        - PolicyName: ClearSkyApplicationStorageAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                Resource:
+                  - !GetAtt ZonesTable.Arn
+                  - !GetAtt ReadingsTable.Arn
+                  - !GetAtt DecisionsTable.Arn
+                  - !GetAtt AlertsTable.Arn
+                  - !GetAtt EventsTable.Arn
+                  - !GetAtt InvestigationsTable.Arn
+                  - !Sub "${ZonesTable.Arn}/index/*"
+                  - !Sub "${ReadingsTable.Arn}/index/*"
+                  - !Sub "${DecisionsTable.Arn}/index/*"
+                  - !Sub "${AlertsTable.Arn}/index/*"
+                  - !Sub "${EventsTable.Arn}/index/*"
+                  - !Sub "${InvestigationsTable.Arn}/index/*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt DataLakeBucket.Arn
+                  - !Sub "${DataLakeBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource:
+                  - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:clearsky/*"
+
+  ElasticBeanstalkInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub "clearsky-eb-instance-profile-${Environment}"
+      Roles:
+        - !Ref ElasticBeanstalkEC2Role
+
 Outputs:
   HttpApiUrl:
     Description: HTTP API Gateway endpoint URL
@@ -502,3 +570,11 @@ Outputs:
   AthenaWorkGroupName:
     Description: Athena workgroup for analytical data lake queries
     Value: !Ref AthenaWorkGroup
+
+  ElasticBeanstalkRoleArn:
+    Description: IAM Role ARN for Elastic Beanstalk EC2 instances
+    Value: !GetAtt ElasticBeanstalkEC2Role.Arn
+
+  ElasticBeanstalkInstanceProfileName:
+    Description: IAM Instance Profile name for Elastic Beanstalk EC2 instances
+    Value: !Ref ElasticBeanstalkInstanceProfile
