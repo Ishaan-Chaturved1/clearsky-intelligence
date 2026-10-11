@@ -73,14 +73,40 @@ app.include_router(api_router, prefix="/api")
 app.include_router(investigation_router, prefix="/api")
 app.include_router(data_health_router, prefix="/api")
 
-@app.get("/")
-def read_root():
-    return {
-        "project": settings.PROJECT_NAME,
-        "descriptor": settings.PROJECT_DESCRIPTOR,
-        "tagline": settings.TAGLINE,
-        "version": settings.VERSION,
-        "team": "Quantified Minds (Ishaan Chaturvedi, Ankit Kumar Tiwari)",
-        "docs_url": "/docs",
-        "api_health": "/api/health"
-    }
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from fastapi import HTTPException
+
+frontend_dist = BASE_DIR / "frontend" / "dist"
+if not frontend_dist.exists():
+    frontend_dist = BASE_DIR / "dist"
+
+if frontend_dist.exists() and (frontend_dist / "index.html").exists():
+    assets_dir = frontend_dist / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/")
+    def read_root():
+        return FileResponse(str(frontend_dist / "index.html"))
+
+    @app.get("/{full_path:path}")
+    def serve_spa(full_path: str):
+        if full_path.startswith("api") or full_path.startswith("docs") or full_path.startswith("openapi.json"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        file_path = frontend_dist / full_path
+        if file_path.is_file():
+            return FileResponse(str(file_path))
+        return FileResponse(str(frontend_dist / "index.html"))
+else:
+    @app.get("/")
+    def read_root():
+        return {
+            "project": settings.PROJECT_NAME,
+            "descriptor": settings.PROJECT_DESCRIPTOR,
+            "tagline": settings.TAGLINE,
+            "version": settings.VERSION,
+            "team": "Quantified Minds (Ishaan Chaturvedi, Ankit Kumar Tiwari)",
+            "docs_url": "/docs",
+            "api_health": "/api/health"
+        }

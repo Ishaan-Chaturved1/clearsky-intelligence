@@ -95,7 +95,7 @@ jobs:
 
       - name: Package Elastic Beanstalk Deployment Bundle
         run: |
-          zip -r clearsky-deploy.zip application.py Procfile requirements.txt backend data .ebextensions \
+          zip -r clearsky-deploy.zip application.py Procfile requirements.txt backend data frontend/dist .ebextensions \
             -x "*__pycache__*" -x "*.pyc" -x "*.pytest_cache*" -x "data/test_s3_lake/*" -x "data/s3_lake/*"
           echo "Created lean deployment package: clearsky-deploy.zip"
 

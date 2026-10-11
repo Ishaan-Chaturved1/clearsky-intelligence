@@ -17,6 +17,14 @@ jobs:
   backend-test:
     name: Backend Test Suite
     runs-on: ubuntu-latest
+    # Run when backend code, tests, or dependencies change
+    # Always runs on PRs targeting main — skip filter applies to push only
+    if: |
+      github.event_name == 'pull_request' ||
+      contains(toJSON(github.event.commits.*.modified), 'backend/') ||
+      contains(toJSON(github.event.commits.*.added), 'backend/') ||
+      contains(toJSON(github.event.commits.*.modified), 'requirements.txt') ||
+      github.event_name == 'push'
 
     steps:
       - name: Checkout Repository
@@ -66,3 +74,11 @@ jobs:
 
       - name: Run TypeScript Type Check & Vite Production Build
         run: npm run build
+
+      # Upload built dist so deploy-frontend can consume it without rebuilding
+      - name: Upload Frontend Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist-${{ github.sha }}
+          path: frontend/dist/
+          retention-days: 3

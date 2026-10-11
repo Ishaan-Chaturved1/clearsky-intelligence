@@ -1,0 +1,314 @@
+name: Deploy Backend — Elastic Beanstalk
+# Deploys ONLY the backend (FastAPI + SAM infrastructure) to Elastic Beanstalk.
+# Does NOT rebuild or redeploy the frontend.
+# Trigger: manual via workflow_dispatch, or automatically on push to main
+#          when backend files change.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: 'Deployment Environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - staging
+          - production
+      skip_tests:
+        description: 'Skip pre-deployment tests (emergency use only)'
+        required: false
+        default: 'false'
+        type: boolean
+
+  push:
+    branches: [ main ]
+    paths:
+      - 'backend/**'
+      - 'application.py'
+      - 'Procfile'
+      - 'requirements.txt'
+      - '.ebextensions/**'
+      - 'infrastructure/template.yaml'
+
+concurrency:
+  group: deploy-backend-${{ github.ref }}
+  cancel-in-progress: false   # Never cancel an in-flight deployment
+
+permissions:
+  contents: read
+
+env:
+  REGION: us-east-1
+  TARGET_ENV: ${{ github.event.inputs.target_environment || 'production' }}
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # 1. Verify tests pass before touching AWS
+  # ──────────────────────────────────────────────────────────────────────────
+  backend-test:
+    name: Pre-Deployment Backend Tests
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.skip_tests != 'true' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyyaml
+
+      - name: Run Tests
+        env:
+          ENVIRONMENT: test
+          STORAGE_BACKEND: json
+          AWS_REGION: us-east-1
+        run: pytest backend/tests -v --durations=5
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. Build and package the EB deployment bundle
+  #    (backend only — frontend/dist is included only if already present in
+  #     the repo via git-lfs or a prior build; it is NOT rebuilt here)
+  # ──────────────────────────────────────────────────────────────────────────
+  package:
+    name: Package Elastic Beanstalk Bundle
+    runs-on: ubuntu-latest
+    needs: [backend-test]
+    if: always() && (needs.backend-test.result == 'success' || needs.backend-test.result == 'skipped')
+
+    outputs:
+      version_label: ${{ steps.label.outputs.version_label }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set Version Label
+        id: label
+        run: |
+          TS=$(date +%Y%m%d%H%M%S)
+          LABEL="backend-${TARGET_ENV}-${TS}-${{ github.sha }}"
+          echo "version_label=${LABEL}" >> "$GITHUB_OUTPUT"
+          echo "Version label: ${LABEL}"
+
+      - name: Package Backend Bundle
+        run: |
+          zip -r clearsky-backend.zip \
+            application.py \
+            Procfile \
+            requirements.txt \
+            backend \
+            data \
+            .ebextensions \
+            -x "*__pycache__*" -x "*.pyc" -x "*.pytest_cache*" \
+               -x "data/test_s3_lake/*" -x "data/s3_lake/*"
+          echo "Bundle size: $(du -sh clearsky-backend.zip | cut -f1)"
+
+      - name: Upload Bundle Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-bundle-${{ github.sha }}
+          path: clearsky-backend.zip
+          retention-days: 7
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 3. Deploy SAM/CloudFormation infrastructure (DynamoDB, Lambda, SQS)
+  #    Only runs when AWS credentials are configured
+  # ──────────────────────────────────────────────────────────────────────────
+  deploy-infrastructure:
+    name: Deploy Serverless Infrastructure (SAM)
+    runs-on: ubuntu-latest
+    needs: [package]
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      serverless_api_url: ${{ steps.sam-deploy.outputs.serverless_api_url }}
+      data_lake_bucket: ${{ steps.sam-deploy.outputs.data_lake_bucket }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.REGION }}
+          audience: sts.amazonaws.com
+
+      - run: aws sts get-caller-identity
+
+      - name: SAM Build
+        run: |
+          sam build \
+            --template-file infrastructure/template.yaml \
+            --use-container
+
+      - name: SAM Deploy
+        id: sam-deploy
+        env:
+          OPENAQ_KEY: ${{ secrets.OPENAQ_API_KEY }}
+          FIRMS_KEY: ${{ secrets.NASA_FIRMS_MAP_KEY }}
+          CPCB_KEY: ${{ secrets.DATA_GOV_IN_API_KEY }}
+        run: |
+          sam deploy \
+            --template-file .aws-sam/build/template.yaml \
+            --stack-name "clearsky-serverless-${TARGET_ENV}" \
+            --capabilities CAPABILITY_IAM \
+            --no-fail-on-empty-changeset \
+            --region "${REGION}" \
+            --parameter-overrides \
+                Environment="${TARGET_ENV}" \
+                OpenAQApiKey="${OPENAQ_KEY}" \
+                NasaFirmsMapKey="${FIRMS_KEY}" \
+                CpcbDataGovApiKey="${CPCB_KEY}"
+
+          API_URL=$(aws cloudformation describe-stacks \
+            --stack-name "clearsky-serverless-${TARGET_ENV}" \
+            --region "${REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='HttpApiUrl'].OutputValue" \
+            --output text)
+
+          BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "clearsky-serverless-${TARGET_ENV}" \
+            --region "${REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='DataLakeBucketName'].OutputValue" \
+            --output text)
+
+          echo "serverless_api_url=${API_URL}" >> "$GITHUB_OUTPUT"
+          echo "data_lake_bucket=${BUCKET}" >> "$GITHUB_OUTPUT"
+          echo "Infrastructure deployed — API: ${API_URL}, Bucket: ${BUCKET}"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 4. Deploy the application bundle to Elastic Beanstalk
+  # ──────────────────────────────────────────────────────────────────────────
+  deploy-eb:
+    name: Deploy to Elastic Beanstalk
+    runs-on: ubuntu-latest
+    needs: [package, deploy-infrastructure]
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      eb_app_url: ${{ steps.deploy.outputs.eb_app_url }}
+
+    steps:
+      - name: Validate Required Secrets
+        env:
+          EB_APP_NAME: ${{ secrets.EB_APP_NAME }}
+          EB_ENV_NAME: ${{ secrets.EB_ENV_NAME }}
+          S3_DEPLOY_BUCKET: ${{ secrets.S3_DEPLOY_BUCKET }}
+        run: |
+          missing=""
+          [ -z "$EB_APP_NAME" ]     && missing="$missing EB_APP_NAME"
+          [ -z "$EB_ENV_NAME" ]     && missing="$missing EB_ENV_NAME"
+          [ -z "$S3_DEPLOY_BUCKET" ] && missing="$missing S3_DEPLOY_BUCKET"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required secrets:${missing}"
+            exit 1
+          fi
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Download Deployment Bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-bundle-${{ github.sha }}
+
+      - name: Upload to S3 & Deploy to EB
+        id: deploy
+        env:
+          EB_APP_NAME: ${{ secrets.EB_APP_NAME }}
+          EB_ENV_NAME: ${{ secrets.EB_ENV_NAME }}
+          S3_DEPLOY_BUCKET: ${{ secrets.S3_DEPLOY_BUCKET }}
+          VERSION_LABEL: ${{ needs.package.outputs.version_label }}
+        run: |
+          S3_KEY="clearsky/${VERSION_LABEL}.zip"
+          echo "Uploading bundle to s3://${S3_DEPLOY_BUCKET}/${S3_KEY}"
+          aws s3 cp clearsky-backend.zip "s3://${S3_DEPLOY_BUCKET}/${S3_KEY}" --region "${REGION}"
+
+          aws elasticbeanstalk create-application-version \
+            --application-name "${EB_APP_NAME}" \
+            --version-label "${VERSION_LABEL}" \
+            --source-bundle S3Bucket="${S3_DEPLOY_BUCKET}",S3Key="${S3_KEY}" \
+            --region "${REGION}"
+
+          aws elasticbeanstalk update-environment \
+            --environment-name "${EB_ENV_NAME}" \
+            --version-label "${VERSION_LABEL}" \
+            --region "${REGION}"
+
+          echo "Waiting for EB environment to stabilise..."
+          aws elasticbeanstalk wait environment-updated \
+            --environment-name "${EB_ENV_NAME}" \
+            --region "${REGION}"
+
+          CNAME=$(aws elasticbeanstalk describe-environments \
+            --environment-names "${EB_ENV_NAME}" \
+            --region "${REGION}" \
+            --query "Environments[0].CNAME" \
+            --output text)
+
+          HEALTH=$(aws elasticbeanstalk describe-environments \
+            --environment-names "${EB_ENV_NAME}" \
+            --region "${REGION}" \
+            --query "Environments[0].Health" \
+            --output text)
+
+          echo "EB environment health: ${HEALTH}, CNAME: ${CNAME}"
+
+          if [ -z "$CNAME" ] || [ "$CNAME" = "None" ]; then
+            echo "::error::No CNAME returned from EB environment."
+            exit 1
+          fi
+          if [ "$HEALTH" = "Red" ]; then
+            echo "::error::EB environment health is RED after deployment."
+            exit 1
+          fi
+
+          echo "eb_app_url=http://${CNAME}" >> "$GITHUB_OUTPUT"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 5. Smoke-test the live deployment
+  # ──────────────────────────────────────────────────────────────────────────
+  smoke-test:
+    name: Post-Deployment Smoke Tests
+    runs-on: ubuntu-latest
+    needs: [deploy-eb, deploy-infrastructure]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install smoke-test dependencies
+        run: pip install requests
+
+      - name: Run Smoke Tests
+        env:
+          TARGET_URL: ${{ secrets.DEPLOYMENT_URL || needs.deploy-eb.outputs.eb_app_url || needs.deploy-infrastructure.outputs.serverless_api_url }}
+        run: |
+          if [ -z "$TARGET_URL" ] || [ "$TARGET_URL" = "None" ]; then
+            echo "::error::No live endpoint URL resolved. Cannot verify deployment."
+            exit 1
+          fi
+          echo "Smoke testing against: ${TARGET_URL}"
+          python3 scripts/smoke_test.py --base-url "${TARGET_URL}"
