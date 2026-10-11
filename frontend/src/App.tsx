@@ -13,6 +13,7 @@ import { MethodologyPage } from './pages/MethodologyPage';
 import { DataSourcesPage } from './pages/DataSourcesPage';
 import { AboutPage } from './pages/AboutPage';
 import { CitizenWatchPage } from './pages/CitizenWatchPage';
+import { InvestigationPage } from './pages/InvestigationPage';
 import { api } from './services/api';
 import { DataMode } from './types';
 
@@ -63,6 +64,7 @@ const AppLayout: React.FC = () => {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/investigations" element={<InvestigationsPage />} />
+          <Route path="/investigation" element={<InvestigationPage />} />
           <Route path="/citizen-watch" element={<CitizenWatchPage />} />
           <Route path="/action-plan" element={<ActionPlanPage />} />
           <Route path="/documents" element={<DocumentsPage />} />

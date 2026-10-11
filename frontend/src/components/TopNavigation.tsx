@@ -108,6 +108,7 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({
   ];
 
   const moreLinks = [
+    { to: '/investigation', label: 'Investigation Engine' },
     { to: '/map', label: 'Map Explorer' },
     { to: '/water-analytics', label: 'Water Analytics' },
     { to: '/methodology', label: 'Methodology' },

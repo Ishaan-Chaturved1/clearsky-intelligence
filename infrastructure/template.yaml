@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  ClearSky Intelligence - Serverless Environmental Intelligence Architecture
+  ClearSky Intelligence - Serverless Environmental Intelligence & Atmospheric Transport Pipeline
   Quantified Minds (Ishaan Chaturvedi, Ankit Kumar Tiwari)
 
 Parameters:
@@ -23,9 +23,15 @@ Parameters:
     NoEcho: true
     Description: NASA FIRMS Map Key for VIIRS active thermal anomalies
 
+  CpcbDataGovApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: data.gov.in API Key for official CPCB ambient air quality observations
+
 Globals:
   Function:
-    Timeout: 30
+    Timeout: 60
     MemorySize: 512
     Runtime: python3.11
     Tracing: Active
@@ -33,12 +39,18 @@ Globals:
       Variables:
         ENVIRONMENT: !Ref Environment
         STORAGE_BACKEND: dynamodb
+        STRICT_AWS_STORAGE: "true"
         DYNAMODB_ZONES_TABLE: !Ref ZonesTable
         DYNAMODB_READINGS_TABLE: !Ref ReadingsTable
         DYNAMODB_DECISIONS_TABLE: !Ref DecisionsTable
         DYNAMODB_ALERTS_TABLE: !Ref AlertsTable
+        DYNAMODB_EVENTS_TABLE: !Ref EventsTable
+        DYNAMODB_INVESTIGATIONS_TABLE: !Ref InvestigationsTable
+        S3_DATA_LAKE_BUCKET: !Ref DataLakeBucket
+        SQS_INGESTION_QUEUE_URL: !Ref IngestionQueue
         OPENAQ_API_KEY: !Ref OpenAQApiKey
         NASA_FIRMS_MAP_KEY: !Ref NasaFirmsMapKey
+        CPCB_DATA_GOV_API_KEY: !Ref CpcbDataGovApiKey
         SNS_ALERT_TOPIC_ARN: !Ref AlertsTopic
 
 Resources:
@@ -108,16 +120,89 @@ Resources:
         - AttributeName: created_at
           KeyType: RANGE
 
+  EventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "clearsky-events-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: event_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: event_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+
+  InvestigationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "clearsky-investigations-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: investigation_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: investigation_id
+          KeyType: HASH
+
   # ==========================================
-  # 2. SNS NOTIFICATIONS TOPIC
+  # 2. S3 DATA LAKE & ARCHIVAL STORAGE
+  # ==========================================
+  DataLakeBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "clearsky-data-lake-${Environment}-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: RawTelemetryTransition
+            Status: Enabled
+            Prefix: raw/
+            Transitions:
+              - TransitionInDays: 90
+                StorageClass: GLACIER
+            ExpirationInDays: 365
+
+  # ==========================================
+  # 3. SQS INGESTION QUEUE & DEAD-LETTER QUEUE
+  # ==========================================
+  IngestionDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "clearsky-ingestion-dlq-${Environment}"
+      MessageRetentionPeriod: 1209600 # 14 days
+
+  IngestionQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "clearsky-ingestion-queue-${Environment}"
+      VisibilityTimeout: 720
+      MessageRetentionPeriod: 345600 # 4 days
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt IngestionDeadLetterQueue.Arn
+        maxReceiveCount: 3
+
+  # ==========================================
+  # 4. SNS OPERATIONAL ALERTS TOPIC
   # ==========================================
   AlertsTopic:
     Type: AWS::SNS::Topic
     Properties:
-      TopicName: !Sub "clearsky-high-priority-alerts-${Environment}"
+      TopicName: !Sub "clearsky-operational-alerts-${Environment}"
 
   # ==========================================
-  # 3. HTTP API GATEWAY
+  # 5. HTTP API GATEWAY
   # ==========================================
   ClearSkyHttpApi:
     Type: AWS::Serverless::HttpApi
@@ -134,7 +219,7 @@ Resources:
         MaxAge: 600
 
   # ==========================================
-  # 4. API FASTAPI LAMBDA
+  # 6. FASTAPI API LAMBDA
   # ==========================================
   ApiFunction:
     Type: AWS::Serverless::Function
@@ -157,9 +242,15 @@ Resources:
             TableName: !Ref DecisionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AlertsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EventsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InvestigationsTable
+        - S3ReadPolicy:
+            BucketName: !Ref DataLakeBucket
 
   # ==========================================
-  # 5. SCHEDULED INGESTION & SCORING LAMBDA
+  # 7. INGESTION LAMBDA (EVENTBRIDGE SCHEDULED)
   # ==========================================
   IngestionFunction:
     Type: AWS::Serverless::Function
@@ -174,7 +265,35 @@ Resources:
           Properties:
             Schedule: rate(30 minutes)
             Name: !Sub "clearsky-ingestion-cron-${Environment}"
-            Description: Triggers environmental data ingestion and zone scoring every 30 minutes
+            Description: Triggers environmental data ingestion from providers every 30 minutes
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ZonesTable
+        - S3CrudPolicy:
+            BucketName: !Ref DataLakeBucket
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt IngestionQueue.QueueName
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertsTopic.TopicName
+
+  # ==========================================
+  # 8. SQS PROCESSING LAMBDA
+  # ==========================================
+  ProcessingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: lambda_handler.sqs_processing_handler
+      Timeout: 120
+      MemorySize: 1024
+      Events:
+        SqsTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt IngestionQueue.Arn
+            BatchSize: 10
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ZonesTable
@@ -184,11 +303,15 @@ Resources:
             TableName: !Ref DecisionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AlertsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EventsTable
+        - S3CrudPolicy:
+            BucketName: !Ref DataLakeBucket
         - SNSPublishMessagePolicy:
             TopicName: !GetAtt AlertsTopic.TopicName
 
   # ==========================================
-  # 6. S3 & CLOUDFRONT FRONTEND HOSTING
+  # 9. S3 FRONTEND BUCKET
   # ==========================================
   FrontendBucket:
     Type: AWS::S3::Bucket
@@ -203,6 +326,222 @@ Resources:
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
 
+  # ==========================================
+  # 10. GLUE CATALOG & ATHENA ANALYTICS
+  # ==========================================
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Sub "clearsky_catalog_${Environment}"
+        Description: Glue catalog database for historical environmental observations
+
+  AthenaWorkGroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: !Sub "clearsky-workgroup-${Environment}"
+      Description: Athena workgroup for analytical querying of historical pollution data lake
+      State: ENABLED
+      WorkGroupConfiguration:
+        ResultConfiguration:
+          OutputLocation: !Sub "s3://${DataLakeBucket}/athena-results/"
+
+  # ==========================================
+  # 11. CLOUDWATCH METRIC ALARMS
+  # ==========================================
+  DLQMessagesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "clearsky-dlq-messages-${Environment}"
+      AlarmDescription: Triggers when messages enter the Ingestion Dead-Letter Queue
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt IngestionDeadLetterQueue.QueueName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  IngestionErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "clearsky-ingestion-errors-${Environment}"
+      AlarmDescription: Triggers when Ingestion Lambda fails
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref IngestionFunction
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  ProcessingErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "clearsky-processing-errors-${Environment}"
+      AlarmDescription: Triggers when SQS Processing Lambda fails
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ProcessingFunction
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  # ==========================================
+  # 12. CLOUDWATCH DASHBOARD
+  # ==========================================
+  ClearSkyDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "clearsky-intelligence-${Environment}"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "ClearSky/Pipeline", "IngestedObservationsCount", { "stat": "Sum", "period": 300 } ],
+                  [ "ClearSky/Pipeline", "ProcessedMessagesCount", { "stat": "Sum", "period": 300 } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Pipeline Observations & Processing Throughput"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "ClearSky/Pipeline", "IngestionFailures", { "stat": "Sum", "period": 300 } ],
+                  [ "ClearSky/Pipeline", "ProcessingFailures", { "stat": "Sum", "period": 300 } ],
+                  [ "ClearSky/Pipeline", "DeadLetterMessages", { "stat": "Sum", "period": 300 } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Pipeline Failures & DLQ Messages"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "${IngestionQueue.QueueName}", { "stat": "Maximum", "period": 300 } ],
+                  [ "AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "${IngestionDeadLetterQueue.QueueName}", { "stat": "Maximum", "period": 300 } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "SQS Queue Depth & DLQ Backlog"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${IngestionFunction}", { "stat": "Average", "period": 300 } ],
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${ProcessingFunction}", { "stat": "Average", "period": 300 } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Execution Latency (ms)"
+              }
+            }
+          ]
+        }
+
+  # ==========================================
+  # 12. ELASTIC BEANSTALK EC2 IAM INSTANCE PROFILE
+  # ==========================================
+  ElasticBeanstalkEC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "clearsky-eb-ec2-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier
+      Policies:
+        - PolicyName: ClearSkyApplicationStorageAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                Resource:
+                  - !GetAtt ZonesTable.Arn
+                  - !GetAtt ReadingsTable.Arn
+                  - !GetAtt DecisionsTable.Arn
+                  - !GetAtt AlertsTable.Arn
+                  - !GetAtt EventsTable.Arn
+                  - !GetAtt InvestigationsTable.Arn
+                  - !Sub "${ZonesTable.Arn}/index/*"
+                  - !Sub "${ReadingsTable.Arn}/index/*"
+                  - !Sub "${DecisionsTable.Arn}/index/*"
+                  - !Sub "${AlertsTable.Arn}/index/*"
+                  - !Sub "${EventsTable.Arn}/index/*"
+                  - !Sub "${InvestigationsTable.Arn}/index/*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt DataLakeBucket.Arn
+                  - !Sub "${DataLakeBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource:
+                  - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:clearsky/*"
+
+  ElasticBeanstalkInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub "clearsky-eb-instance-profile-${Environment}"
+      Roles:
+        - !Ref ElasticBeanstalkEC2Role
+
 Outputs:
   HttpApiUrl:
     Description: HTTP API Gateway endpoint URL
@@ -212,6 +551,30 @@ Outputs:
     Description: S3 bucket for hosting compiled Vite frontend
     Value: !Ref FrontendBucket
 
+  DataLakeBucketName:
+    Description: S3 bucket for environmental data lake
+    Value: !Ref DataLakeBucket
+
+  IngestionQueueUrl:
+    Description: SQS Ingestion Queue URL
+    Value: !Ref IngestionQueue
+
+  IngestionDLQUrl:
+    Description: SQS Ingestion Dead-Letter Queue URL
+    Value: !Ref IngestionDeadLetterQueue
+
   AlertsTopicArn:
-    Description: SNS Topic ARN for priority 4 & 5 alerts
+    Description: SNS Topic ARN for operational alerts
     Value: !Ref AlertsTopic
+
+  AthenaWorkGroupName:
+    Description: Athena workgroup for analytical data lake queries
+    Value: !Ref AthenaWorkGroup
+
+  ElasticBeanstalkRoleArn:
+    Description: IAM Role ARN for Elastic Beanstalk EC2 instances
+    Value: !GetAtt ElasticBeanstalkEC2Role.Arn
+
+  ElasticBeanstalkInstanceProfileName:
+    Description: IAM Instance Profile name for Elastic Beanstalk EC2 instances
+    Value: !Ref ElasticBeanstalkInstanceProfile

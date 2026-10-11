@@ -1,0 +1,244 @@
+name: ClearSky Intelligence Continuous Deployment
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: 'Deployment Environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - staging
+          - production
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  pre-deploy-check:
+    name: Verify Tests, Build Frontend & Package EB Bundle
+    runs-on: ubuntu-latest
+    outputs:
+      has_aws_role: ${{ steps.check-creds.outputs.has_aws_role }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Verify Deployment Prerequisites
+        id: check-creds
+        env:
+          ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          if [ -n "$ROLE_ARN" ]; then
+            echo "has_aws_role=true" >> "$GITHUB_OUTPUT"
+            echo "AWS OIDC Role configured: $ROLE_ARN"
+          else
+            echo "has_aws_role=false" >> "$GITHUB_OUTPUT"
+            echo "AWS OIDC Role ARN secret (AWS_DEPLOY_ROLE_ARN) is not yet set in repository secrets."
+            echo "Artifact packaging will proceed, but live deployment will be skipped until OIDC is provisioned."
+          fi
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Backend Test Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Backend Pre-Deployment Tests
+        env:
+          ENVIRONMENT: test
+          STORAGE_BACKEND: json
+          AWS_REGION: us-east-1
+        run: |
+          pytest backend/tests -v --durations=5
+
+      - name: Set up Node.js 20 & Build Frontend
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Compile Frontend Distribution
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Package Elastic Beanstalk Deployment Bundle
+        run: |
+          zip -r clearsky-deploy.zip application.py Procfile requirements.txt backend data .ebextensions \
+            -x "*__pycache__*" -x "*.pyc" -x "*.pytest_cache*" -x "data/test_s3_lake/*" -x "data/s3_lake/*"
+          echo "Created lean deployment package: clearsky-deploy.zip"
+
+      - name: Upload Deployment Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clearsky-deployment-bundle
+          path: clearsky-deploy.zip
+          retention-days: 7
+
+  deploy-infrastructure:
+    name: Deploy Serverless Infrastructure via SAM
+    needs: pre-deploy-check
+    if: needs.pre-deploy-check.outputs.has_aws_role == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      serverless_api_url: ${{ steps.sam-deploy.outputs.serverless_api_url }}
+      data_lake_bucket: ${{ steps.sam-deploy.outputs.data_lake_bucket }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Configure AWS Credentials via GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          audience: sts.amazonaws.com
+
+      - name: Verify AWS Caller Identity
+        run: |
+          aws sts get-caller-identity
+
+      - name: Build Serverless Infrastructure Stack
+        run: |
+          sam build --template-file infrastructure/template.yaml --use-container --debug
+
+      - name: Deploy Infrastructure Stack via SAM
+        id: sam-deploy
+        env:
+          TARGET_ENV: ${{ github.event.inputs.target_environment || 'production' }}
+          OPENAQ_KEY: ${{ secrets.OPENAQ_API_KEY }}
+          FIRMS_KEY: ${{ secrets.NASA_FIRMS_MAP_KEY }}
+          CPCB_KEY: ${{ secrets.DATA_GOV_IN_API_KEY }}
+        run: |
+          sam deploy \
+            --template-file .aws-sam/build/template.yaml \
+            --stack-name clearsky-serverless-${TARGET_ENV} \
+            --capabilities CAPABILITY_IAM \
+            --no-fail-on-empty-changeset \
+            --region ${{ secrets.AWS_REGION || 'us-east-1' }} \
+            --parameter-overrides \
+                Environment=${TARGET_ENV} \
+                OpenAQApiKey="${OPENAQ_KEY}" \
+                NasaFirmsMapKey="${FIRMS_KEY}" \
+                CpcbDataGovApiKey="${CPCB_KEY}"
+
+          API_URL=$(aws cloudformation describe-stacks \
+            --stack-name clearsky-serverless-${TARGET_ENV} \
+            --region ${{ secrets.AWS_REGION || 'us-east-1' }} \
+            --query "Stacks[0].Outputs[?OutputKey=='HttpApiUrl'].OutputValue" \
+            --output text || true)
+          echo "serverless_api_url=${API_URL}" >> "$GITHUB_OUTPUT"
+
+          BUCKET_NAME=$(aws cloudformation describe-stacks \
+            --stack-name clearsky-serverless-${TARGET_ENV} \
+            --region ${{ secrets.AWS_REGION || 'us-east-1' }} \
+            --query "Stacks[0].Outputs[?OutputKey=='DataLakeBucketName'].OutputValue" \
+            --output text || true)
+          echo "data_lake_bucket=${BUCKET_NAME}" >> "$GITHUB_OUTPUT"
+
+  deploy-application:
+    name: Deploy Main Web Application to Elastic Beanstalk
+    needs: [pre-deploy-check, deploy-infrastructure]
+    if: needs.pre-deploy-check.outputs.has_aws_role == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      eb_app_url: ${{ steps.eb-deploy.outputs.eb_app_url }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials via GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          audience: sts.amazonaws.com
+
+      - name: Download Deployment Package
+        uses: actions/download-artifact@v4
+        with:
+          name: clearsky-deployment-bundle
+
+      - name: Deploy to Elastic Beanstalk Environment
+        id: eb-deploy
+        env:
+          EB_APP_NAME: ${{ secrets.EB_APP_NAME }}
+          EB_ENV_NAME: ${{ secrets.EB_ENV_NAME }}
+          S3_DEPLOY_BUCKET: ${{ secrets.S3_DEPLOY_BUCKET }}
+        run: |
+          if [ -n "$EB_APP_NAME" ] && [ -n "$EB_ENV_NAME" ] && [ -n "$S3_DEPLOY_BUCKET" ]; then
+            VERSION_LABEL="deploy-$(date +%Y%m%d%H%M%S)-${{ github.sha }}"
+            echo "Uploading bundle to s3://${S3_DEPLOY_BUCKET}/clearsky/${VERSION_LABEL}.zip"
+            aws s3 cp clearsky-deploy.zip "s3://${S3_DEPLOY_BUCKET}/clearsky/${VERSION_LABEL}.zip"
+            
+            aws elasticbeanstalk create-application-version \
+              --application-name "$EB_APP_NAME" \
+              --version-label "$VERSION_LABEL" \
+              --source-bundle S3Bucket="$S3_DEPLOY_BUCKET",S3Key="clearsky/${VERSION_LABEL}.zip"
+              
+            aws elasticbeanstalk update-environment \
+              --environment-name "$EB_ENV_NAME" \
+              --version-label "$VERSION_LABEL"
+            
+            echo "Waiting for Elastic Beanstalk environment update to complete..."
+            aws elasticbeanstalk wait environment-updated --environment-name "$EB_ENV_NAME"
+            
+            CNAME=$(aws elasticbeanstalk describe-environments \
+              --environment-names "$EB_ENV_NAME" \
+              --query "Environments[0].CNAME" \
+              --output text || true)
+            if [ -n "$CNAME" ] && [ "$CNAME" != "None" ]; then
+              echo "eb_app_url=http://${CNAME}" >> "$GITHUB_OUTPUT"
+              echo "Elastic Beanstalk deployed at: http://${CNAME}"
+            fi
+          else
+            echo "Elastic Beanstalk credentials (EB_APP_NAME, EB_ENV_NAME, S3_DEPLOY_BUCKET) not set in secrets."
+            echo "Application bundle clearsky-deploy.zip is prepared and ready for manual or CLI deployment."
+          fi
+
+  post-deploy-verify:
+    name: Run Post-Deployment Smoke Tests
+    needs: [deploy-infrastructure, deploy-application]
+    if: needs.pre-deploy-check.outputs.has_aws_role == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run Smoke Tests against Live Deployment
+        env:
+          TARGET_URL: ${{ secrets.DEPLOYMENT_URL || needs.deploy-application.outputs.eb_app_url || needs.deploy-infrastructure.outputs.serverless_api_url }}
+        run: |
+          if [ -n "$TARGET_URL" ] && [ "$TARGET_URL" != "None" ]; then
+            echo "Running deployment smoke tests against target: ${TARGET_URL}"
+            python3 scripts/smoke_test.py --base-url "$TARGET_URL"
+          else
+            echo "No live target URL available (neither EB nor Serverless API endpoint set); skipping smoke test execution."
+          fi

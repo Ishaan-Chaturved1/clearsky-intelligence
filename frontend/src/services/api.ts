@@ -18,7 +18,12 @@ import {
   InterventionOutcomeRecord,
   GeocodingPlace,
   StationObservation,
-  LocationAnalysisResponse
+  LocationAnalysisResponse,
+  InvestigationDossier,
+  InvestigationAnalyzeParams,
+  LocalSourceInvestigationResult,
+  TransportAssessment,
+  SatelliteFireCorrelationResult
 } from '../types';
 
 const API_BASE = '/api';
@@ -168,5 +173,44 @@ export const api = {
         reporter_contact: contact,
         item_id: itemId
       })
-    })
+    }),
+
+  // Stage 3 Investigation Endpoints
+  getInvestigationLocalSources: (lat: number, lon: number, radiusKm = 3.0) =>
+    fetchJson<LocalSourceInvestigationResult>(
+      `${API_BASE}/investigation/local-sources?latitude=${lat}&longitude=${lon}&radius_km=${radiusKm}`
+    ),
+
+  getInvestigationTransport: (lat: number, lon: number, lookbackHours = 12, referenceTime?: string) =>
+    fetchJson<TransportAssessment>(
+      `${API_BASE}/investigation/transport?latitude=${lat}&longitude=${lon}&lookback_hours=${lookbackHours}${referenceTime ? `&reference_time=${encodeURIComponent(referenceTime)}` : ''}`
+    ),
+
+  getInvestigationFires: (lat: number, lon: number, radiusKm = 50.0) =>
+    fetchJson<SatelliteFireCorrelationResult>(
+      `${API_BASE}/investigation/satellite-fires?latitude=${lat}&longitude=${lon}&radius_km=${radiusKm}`
+    ),
+
+  analyzeInvestigation: (params: InvestigationAnalyzeParams) =>
+    fetchJson<InvestigationDossier>(`${API_BASE}/investigation/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    }),
+
+  getInvestigationDossier: (investigationId: string) =>
+    fetchJson<InvestigationDossier>(`${API_BASE}/investigation/dossiers/${investigationId}`),
+
+  getInvestigationDossiers: () =>
+    fetchJson<Array<{
+      investigation_id: string;
+      target_scope: string;
+      target_latitude: number;
+      target_longitude: number;
+      pollutants: string[];
+      supporting_evidence_count: number;
+      contradicting_evidence_count: number;
+      confidence_assessment: string;
+      generated_at: string;
+    }>>(`${API_BASE}/investigation/dossiers`)
 };
