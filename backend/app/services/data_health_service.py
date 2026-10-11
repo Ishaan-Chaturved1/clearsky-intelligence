@@ -267,14 +267,31 @@ class DataHealthService:
     # LIVE CHECK IMPLEMENTATION
     # =========================================================================
 
+    def _is_source_configured(self, src: DataSourceMetadata) -> tuple[bool, List[str]]:
+        """
+        Determines whether required credentials/configurations are present
+        for a given source, checking both the active client adapter and environment variables.
+        """
+        if src.source_id == "nasa_firms_viirs":
+            if self.firms_client.is_available():
+                return True, []
+            return False, ["NASA_FIRMS_MAP_KEY"]
+        elif src.source_id == "cpcb_in":
+            if self.cpcb_client.is_available():
+                return True, []
+            return False, ["CPCB_DATA_GOV_API_KEY"]
+
+        missing = [cfg for cfg in src.required_config if not os.getenv(cfg)]
+        return len(missing) == 0, missing
+
     async def _run_live_check(self, src: DataSourceMetadata, now_utc: datetime) -> SourceVerificationResult:
         start_time = time.time()
         res_fields = src.supported_fields
         t_sec = src.freshness_threshold_seconds
 
-        # Check required configuration
-        missing_configs = [cfg for cfg in src.required_config if not os.getenv(cfg)]
-        if missing_configs:
+        # Check required configuration against client adapter state and environment
+        is_configured, missing_configs = self._is_source_configured(src)
+        if not is_configured:
             return SourceVerificationResult(
                 source_id=src.source_id,
                 source_name=src.source_name,

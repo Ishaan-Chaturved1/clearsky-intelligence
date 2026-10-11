@@ -1,6 +1,9 @@
+from datetime import datetime, timezone, timedelta
+from unittest.mock import patch, AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
+from app.data_sources.base import SourceFetchResult
 
 @pytest.fixture
 def client():
@@ -102,15 +105,33 @@ def test_candidate_road_segments_endpoint(client):
     assert "priority_score" in first_seg
 
 def test_forecast_windows_endpoint(client):
-    res = client.get("/api/zones/DEL-AV-01/forecast-windows")
-    assert res.status_code == 200
-    data = res.json()
-    assert data["zone_id"] == "DEL-AV-01"
-    assert len(data["windows"]) >= 5
-    first_win = data["windows"][0]
-    assert "suitability_score" in first_win
-    assert "suitability_label" in first_win
-    assert "forecast_temp_c" in first_win
+    now = datetime.now(timezone.utc)
+    hourly_times = [(now + timedelta(hours=i)).strftime("%Y-%m-%dT%H:00") for i in range(24)]
+    mock_weather = SourceFetchResult(
+        source_name="Open-Meteo Weather Forecast",
+        is_success=True,
+        data={
+            "raw_hourly": {
+                "time": hourly_times,
+                "temperature_2m": [28.0 + (i % 4) for i in range(24)],
+                "relative_humidity_2m": [50.0 + (i % 15) for i in range(24)],
+                "wind_speed_10m": [8.0 + (i % 3) for i in range(24)],
+                "precipitation": [0.0] * 24,
+                "surface_pressure": [1012.0] * 24
+            }
+        },
+        fetched_at=now.timestamp()
+    )
+    with patch("app.api.endpoints.ingestion_service.open_meteo.get_weather", new_callable=AsyncMock, return_value=mock_weather):
+        res = client.get("/api/zones/DEL-AV-01/forecast-windows")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["zone_id"] == "DEL-AV-01"
+        assert len(data["windows"]) >= 5
+        first_win = data["windows"][0]
+        assert "suitability_score" in first_win
+        assert "suitability_label" in first_win
+        assert "forecast_temp_c" in first_win
 
 def test_strategy_comparison_endpoint(client):
     res = client.get("/api/analytics/strategy-comparison?days=7")
