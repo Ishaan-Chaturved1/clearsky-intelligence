@@ -2,14 +2,18 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+# Ensure backend and project root directories are in sys.path
+_current_file = Path(__file__).resolve()
+_backend_dir = _current_file.parent.parent
+_project_root = _backend_dir.parent
+for _p in (_backend_dir, _project_root):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings, BASE_DIR
-
-# Ensure project root is in sys.path
-if str(BASE_DIR) not in sys.path:
-    sys.path.insert(0, str(BASE_DIR))
-
 from app.core.logging import logger
 from app.api.endpoints import router as api_router
 from app.repositories.local_repository import SQLiteRepository
@@ -18,15 +22,31 @@ from app.repositories.local_repository import SQLiteRepository
 async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION} [{settings.ENVIRONMENT}]")
     
-    # Auto-seed SQLite database if empty
-    if settings.STORAGE_BACKEND == "sqlite":
-        repo = SQLiteRepository(settings.SQLITE_DB_PATH)
-        existing_zones = repo.list_zones()
-        if not existing_zones:
-            logger.info("Database is empty. Automatically executing seed script...")
+    from app.repositories import get_repository
+    repo = get_repository()
+    existing_zones = repo.list_zones()
+    if not existing_zones:
+        logger.info(f"Storage backend '{settings.STORAGE_BACKEND}' is empty. Initializing zones from data/zones.json...")
+        if settings.STORAGE_BACKEND == "sqlite":
             from scripts.seed_demo_data import seed_database
             seed_database(settings.SQLITE_DB_PATH)
-            logger.info("Automatic demo seeding finished.")
+        else:
+            import json
+            from app.models.domain import Zone, NearbyInfrastructure
+            zones_json_path = BASE_DIR / "data" / "zones.json"
+            if zones_json_path.exists():
+                with open(zones_json_path, "r", encoding="utf-8") as f:
+                    for zd in json.load(f):
+                        repo.save_zone(Zone(
+                            zone_id=zd["zone_id"],
+                            name=zd["name"],
+                            latitude=zd["latitude"],
+                            longitude=zd["longitude"],
+                            description=zd.get("description", ""),
+                            zone_type=zd.get("zone_type", "Urban"),
+                            nearby_infrastructure=NearbyInfrastructure(**zd.get("nearby_infrastructure", {}))
+                        ))
+        logger.info("Zones initialization finished.")
             
     yield
     logger.info(f"Shutting down {settings.PROJECT_NAME}")

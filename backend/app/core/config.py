@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -23,9 +23,22 @@ class Settings(BaseModel):
         origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000,*").split(",") if origin.strip()
     ]
     
-    # Storage
+    # Storage: "sqlite", "json", or "dynamodb"
     STORAGE_BACKEND: str = os.getenv("STORAGE_BACKEND", "sqlite")
     SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH", str(BASE_DIR / "data" / "clearsky.db"))
+    JSON_STORAGE_DIR: str = os.getenv("JSON_STORAGE_DIR", str(BASE_DIR / "data"))
+    
+    # AWS S3 & DynamoDB Configuration
+    S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME", "")
+    S3_REGION: str = os.getenv("S3_REGION", os.getenv("AWS_REGION", "us-east-1"))
+    DYNAMODB_ENDPOINT_URL: Optional[str] = os.getenv("DYNAMODB_ENDPOINT_URL", None)
+    DYNAMODB_ZONES_TABLE: str = os.getenv("DYNAMODB_ZONES_TABLE", "clearsky-zones")
+    DYNAMODB_READINGS_TABLE: str = os.getenv("DYNAMODB_READINGS_TABLE", "clearsky-readings")
+    DYNAMODB_DECISIONS_TABLE: str = os.getenv("DYNAMODB_DECISIONS_TABLE", "clearsky-decisions")
+    DYNAMODB_ALERTS_TABLE: str = os.getenv("DYNAMODB_ALERTS_TABLE", "clearsky-alerts")
+    DYNAMODB_REPORTS_TABLE: str = os.getenv("DYNAMODB_REPORTS_TABLE", "clearsky-citizen-reports")
+    DYNAMODB_REWARDS_TABLE: str = os.getenv("DYNAMODB_REWARDS_TABLE", "clearsky-rewards")
+    DYNAMODB_REDEMPTIONS_TABLE: str = os.getenv("DYNAMODB_REDEMPTIONS_TABLE", "clearsky-redemptions")
     
     # Timeouts & Limits
     API_TIMEOUT_SECONDS: float = float(os.getenv("API_TIMEOUT_SECONDS", "10.0"))

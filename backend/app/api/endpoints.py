@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query, Header, Response
-from app.core.config import settings
+from app.core.config import settings, BASE_DIR
 from app.core.logging import logger
 from app.models.domain import (
     Zone,
@@ -58,11 +58,9 @@ from app.services.geocoding_service import GeocodingService
 
 router = APIRouter()
 
-# Select repository based on environment
-if settings.STORAGE_BACKEND == "dynamodb":
-    repository = DynamoDBRepository(region_name=settings.AWS_REGION)
-else:
-    repository = SQLiteRepository(settings.SQLITE_DB_PATH)
+from app.repositories import get_repository
+
+repository = get_repository()
 
 ingestion_service = IngestionService(repository)
 analytics_service = WaterEfficiencyAnalytics(
@@ -545,98 +543,33 @@ def get_sources_status():
 
 @router.get("/methodology", response_model=MethodologyResponse)
 def get_methodology():
+    import json
+    from pathlib import Path
+    
+    meth_path = BASE_DIR / "data" / "methodology.json"
+    if meth_path.exists():
+        try:
+            with open(meth_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            rules = [MethodologyRule(**r) for r in data.get("rules", [])]
+            return MethodologyResponse(
+                title=data.get("title", "ClearSky Intelligence Decision Engine Methodology"),
+                version=data.get("version", "v1.2-Deterministic"),
+                core_premise=data.get("core_premise", ""),
+                rules=rules,
+                confidence_calculation=data.get("confidence_calculation", ""),
+                system_limitations=data.get("system_limitations", [])
+            )
+        except Exception as e:
+            logger.warning(f"Failed to read methodology.json: {e}")
+
     return MethodologyResponse(
         title="ClearSky Intelligence Decision Engine Methodology",
         version="v1.2-Deterministic",
-        core_premise=(
-            "Targeted dust suppression (anti-smog water misting) should only occur when evidence supports "
-            "coarse mechanical/fugitive dust dominance, atmospheric conditions are suitable for droplet deposition, "
-            "and sufficient fresh observations exist. Generic high AQI alone does NOT warrant water deployment."
-        ),
-        rules=[
-            MethodologyRule(
-                rule_id="RULE-01",
-                name="Potential Coarse Dust Dominance",
-                rationale="Coarse earth/road dust elevates PM10 disproportionately relative to PM2.5.",
-                threshold="PM10/PM2.5 Ratio >= 2.0 and PM10 >= 120 µg/m³",
-                decision_impact="INTERVENTION_RECOMMENDED candidate (priority 2-5)",
-                scientific_limitation="A high ratio is an empirical indicator, not definitive chemical speciation proof."
-            ),
-            MethodologyRule(
-                rule_id="RULE-02",
-                name="Smoke / Fire Influence Exclusion",
-                rationale="Water mist spraying cannot wash fine combustion smoke aerosols from the regional airshed.",
-                threshold="Active fire anomaly within 50km with upwind smoke transport vector",
-                decision_impact="INTERVENTION_NOT_RECOMMENDED (Strict Precedence)",
-                scientific_limitation="Transport trajectory assumes straight-line advection along surface wind."
-            ),
-            MethodologyRule(
-                rule_id="RULE-03",
-                name="High Relative Humidity Suppression",
-                rationale="At high ambient humidity, water mist evaporates poorly, risks ground puddling and creates artificial fogging.",
-                threshold="Relative Humidity >= 80%",
-                decision_impact="INTERVENTION_NOT_RECOMMENDED",
-                scientific_limitation="Operational municipal guideline rather than fundamental thermodynamic barrier."
-            ),
-            MethodologyRule(
-                rule_id="RULE-04",
-                name="High Wind Dispersion Exclusion",
-                rationale="High wind speeds drift mist droplets away from the target corridor before settling.",
-                threshold="Wind Speed >= 20 km/h",
-                decision_impact="INTERVENTION_NOT_RECOMMENDED",
-                scientific_limitation="Actual drift depends on droplet micron size and equipment elevation."
-            ),
-            MethodologyRule(
-                rule_id="RULE-05",
-                name="Pollution Inversion Advisory",
-                rationale="Low boundary layer height and stagnant winds trap ground-level pollutants.",
-                threshold="Boundary Layer Height <= 300m and Wind Speed <= 5 km/h",
-                decision_impact="Adds operational warning and elevates candidate priority",
-                scientific_limitation="Inversion trapping affects all pollutants, not just dust."
-            ),
-            MethodologyRule(
-                rule_id="RULE-06",
-                name="Nearby Construction Dust Warning",
-                rationale="Active excavation, foundation, or civil work within ~300m is a primary localized fugitive dust source.",
-                threshold="Mapped construction site <= 300m + elevated PM10",
-                decision_impact="Increases intervention priority (+1) and flags contractor review",
-                scientific_limitation="OSM construction tags indicate ongoing work, not real-time dust emission rates."
-            ),
-            MethodologyRule(
-                rule_id="RULE-07",
-                name="Precipitation & Wet Road Disqualification",
-                rationale="Active rainfall or damp road surfaces naturally suppress mechanical dust resuspension, making water spraying redundant and hazardous.",
-                threshold="Current precipitation >= 0.1 mm/h",
-                decision_impact="INTERVENTION_DISCOURAGED (Safety Gate)",
-                scientific_limitation="Small rain showers may evaporate quickly depending on pavement temperature."
-            ),
-            MethodologyRule(
-                rule_id="RULE-08",
-                name="Surface Evaporation & Rapid Drying Feasibility",
-                rationale="Under extreme heat and low humidity, applied water evaporates in <12 minutes, failing to justify tanker deployment.",
-                threshold="Estimated surface drying time < 12 minutes",
-                decision_impact="ALTERNATIVE_DUST_CONTROL_SUGGESTED (Bio-binders or sweepers)",
-                scientific_limitation="Evaporation rate is estimated via aerodynamic vapor pressure deficit equations."
-            ),
-            MethodologyRule(
-                rule_id="RULE-09",
-                name="Barometric Pressure Trend Context",
-                rationale="Surface barometric pressure and 3h/6h/12h trends indicate synoptic weather evolution (cyclonic troughs vs anticyclonic subsidence).",
-                threshold="Barometric tendency classification (RISING >= +1.5 hPa/3h, FALLING <= -1.5 hPa/3h)",
-                decision_impact="Supporting meteorological evidence; not a standalone trigger for spraying",
-                scientific_limitation="Pressure change correlates with regional airmass movement but is not a direct measure of particulate mass."
-            )
-        ],
-        confidence_calculation=(
-            "Confidence is assigned as HIGH when both PM2.5 and PM10 are valid direct station observations within 25km, "
-            "MEDIUM when derived from atmospheric numerical models or partial data, and LOW when readings are stale or incomplete."
-        ),
-        system_limitations=[
-            "ClearSky Intelligence does not claim anti-smog guns eliminate PM2.5.",
-            "Water spraying recommendations carry no guaranteed health improvement claims.",
-            "Calculated water savings are relative to a fixed-schedule operational assumption, not metered flow meters.",
-            "Model estimates must never be treated as exact hyper-local street-level sensors."
-        ]
+        core_premise="Targeted dust suppression based on empirical atmospheric and particulate evidence.",
+        rules=[],
+        confidence_calculation="Assigned based on observational proximity and freshness.",
+        system_limitations=["ClearSky Intelligence provides operational municipal decision support."]
     )
 
 @router.get("/brief/daily", response_model=AiDailyBriefResponse)
