@@ -3,7 +3,7 @@ import { Users, Server, ShieldAlert, Cpu, HeartHandshake, Layers, Code2 } from '
 
 export const AboutPage: React.FC = () => {
   return (
-    <div className="max-w-4xl mx-auto space-y-10 animate-fade-up">
+    <div className="w-full space-y-10 animate-fade-up">
       
       {/* Hero Section */}
       <div className="bg-white rounded-3xl p-8 sm:p-10 border border-warm-200 shadow-warm-sm relative overflow-hidden">

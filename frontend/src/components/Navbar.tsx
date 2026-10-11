@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { RefreshCw, BarChart3, Map, HelpCircle, Database, Info, Layers, ShieldAlert } from 'lucide-react';
+import { RefreshCw, BarChart3, Map, HelpCircle, Database, Info, Layers, ShieldAlert, Menu, X } from 'lucide-react';
 import { DataMode } from '../types';
 import { getDataModeBadge } from '../utils/formatters';
 
@@ -15,6 +15,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onRefresh,
   isRefreshing = false
 }) => {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const modeInfo = getDataModeBadge(dataMode);
 
   const navItems = [
@@ -28,8 +29,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   ];
 
   return (
-    <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-warm-200 shadow-warm-sm transition-colors">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <header className="sticky top-0 z-40 bg-white/85 backdrop-blur-md border-b border-warm-200 shadow-warm-sm transition-colors">
+      <div className="w-full max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
         <div className="flex items-center justify-between h-16">
           
           {/* Logo & Product Identity */}
@@ -55,8 +56,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </NavLink>
 
-          {/* Navigation Links */}
-          <nav className="hidden md:flex items-center gap-1">
+          {/* Navigation Links (Desktop) */}
+          <nav className="hidden lg:flex items-center gap-1">
             {navItems.map((item) => {
               const Icon = item.icon;
               return (
@@ -66,7 +67,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   className={({ isActive }) =>
                     `flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-sans font-medium transition-all ${
                       isActive
-                        ? 'bg-accent-500/10 text-accent-600 border border-accent-500/20 shadow-warm-sm'
+                        ? 'bg-accent-500/10 text-accent-600 border border-accent-500/20 shadow-warm-sm font-semibold'
                         : 'text-earth-500 hover:text-earth-800 hover:bg-warm-100'
                     }`
                   }
@@ -78,8 +79,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             })}
           </nav>
 
-          {/* Right Controls: Mode Badge + Refresh Trigger */}
-          <div className="flex items-center gap-2.5">
+          {/* Right Controls: Mode Badge + Refresh Trigger + Mobile Hamburger */}
+          <div className="flex items-center gap-2">
             {/* System Status Mode Badge */}
             <div
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-mono border font-semibold tracking-wider bg-warm-100 border-warm-300 text-earth-600"
@@ -101,9 +102,44 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span className="hidden sm:inline">Refresh</span>
               </button>
             )}
+
+            {/* Mobile Hamburger Menu Button */}
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="lg:hidden p-1.5 rounded-xl text-earth-500 hover:text-earth-800 hover:bg-warm-100 border border-warm-300 transition-colors ml-1"
+              aria-label="Toggle navigation menu"
+            >
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
           </div>
 
         </div>
+
+        {/* Mobile Navigation Dropdown */}
+        {mobileMenuOpen && (
+          <nav className="lg:hidden py-3 border-t border-warm-200 grid grid-cols-2 sm:grid-cols-3 gap-1.5 pb-4 animate-fade-down">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-sans font-medium transition-all ${
+                      isActive
+                        ? 'bg-accent-500/10 text-accent-600 border border-accent-500/20 font-semibold shadow-warm-sm'
+                        : 'text-earth-600 hover:bg-warm-100'
+                    }`
+                  }
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{item.label}</span>
+                </NavLink>
+              );
+            })}
+          </nav>
+        )}
       </div>
     </header>
   );

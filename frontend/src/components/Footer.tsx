@@ -4,7 +4,7 @@ import { ShieldCheck, Droplets, Info } from 'lucide-react';
 export const Footer: React.FC = () => {
   return (
     <footer className="bg-white/50 backdrop-blur-sm border-t border-warm-200 mt-16 text-earth-500 text-xs py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="w-full max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pb-6 border-b border-warm-200">
           
           <div>

@@ -315,7 +315,7 @@ export const CitizenWatchPage: React.FC = () => {
       {/* TAB 1: INCIDENT FEED */}
       {activeTab === 'FEED' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
             {reports.map((report) => (
               <div
                 key={report.report_id}
@@ -429,7 +429,7 @@ export const CitizenWatchPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
             {rewards.map((item) => (
               <div
                 key={item.item_id}

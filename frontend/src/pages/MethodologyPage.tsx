@@ -25,7 +25,7 @@ export const MethodologyPage: React.FC = () => {
   }, []);
 
   return (
-    <div className="max-w-5xl mx-auto space-y-10 animate-fade-up">
+    <div className="w-full space-y-10 animate-fade-up">
       
       {/* Header */}
       <div className="border-b border-warm-200 pb-6">
@@ -38,7 +38,7 @@ export const MethodologyPage: React.FC = () => {
         <h1 className="font-sentinel font-bold text-3xl sm:text-4xl text-earth-900 tracking-tight">
           How Recommendations Work
         </h1>
-        <p className="font-clarendon text-base text-earth-600 mt-2 leading-relaxed max-w-3xl">
+        <p className="font-clarendon text-base text-earth-600 mt-2 leading-relaxed max-w-4xl">
           {methodology?.core_premise}
         </p>
       </div>
@@ -52,7 +52,7 @@ export const MethodologyPage: React.FC = () => {
           </h2>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {methodology?.rules.map((rule) => (
             <div
               key={rule.rule_id}

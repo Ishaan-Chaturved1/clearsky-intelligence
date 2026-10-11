@@ -289,12 +289,12 @@ export const MapExplorerPage: React.FC = () => {
             selectedCustomCoords={selectedCustomCoords}
             selectedCustomName={selectedCustomName}
             stations={stations}
-            height="620px"
+            height="680px"
           />
         </div>
 
         {/* Sectors and Locations Sidebar */}
-        <div className="lg:col-span-4 h-[620px] flex flex-col">
+        <div className="lg:col-span-4 h-[680px] xl:h-[720px] flex flex-col">
           
           {/* Active Selection Banner if dynamic point is chosen */}
           {dynamicAnalysis && (

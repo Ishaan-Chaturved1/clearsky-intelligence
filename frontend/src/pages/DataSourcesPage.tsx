@@ -21,7 +21,7 @@ export const DataSourcesPage: React.FC = () => {
   }, []);
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 animate-fade-up">
+    <div className="w-full space-y-8 animate-fade-up">
       
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-warm-200 pb-6">
@@ -78,7 +78,7 @@ export const DataSourcesPage: React.FC = () => {
       </div>
 
       {/* Sources Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
         {statusData?.sources.map((src, idx) => (
           <div
             key={idx}

@@ -173,12 +173,12 @@ export const DashboardPage: React.FC = () => {
             selectedZone={selectedZone}
             onSelectZone={setSelectedZone}
             stations={stations}
-            height="480px"
+            height="540px"
           />
         </div>
 
         {/* Zone Priority Queue */}
-        <div className="lg:col-span-4 flex flex-col h-[530px]">
+        <div className="lg:col-span-4 flex flex-col h-[590px] xl:h-[620px]">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-sentinel font-bold text-sm text-earth-900">
               Sector Queue

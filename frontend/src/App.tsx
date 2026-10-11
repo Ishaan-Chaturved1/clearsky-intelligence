@@ -55,7 +55,7 @@ const AppLayout: React.FC = () => {
       )}
 
       {/* Main Routed Content */}
-      <main className={isLanding ? '' : 'flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8'}>
+      <main className={isLanding ? '' : 'flex-1 w-full max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-6 sm:py-8'}>
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
