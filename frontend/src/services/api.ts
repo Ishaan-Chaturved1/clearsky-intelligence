@@ -30,7 +30,10 @@ import {
 } from '../types';
 
 const rawBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
-const API_BASE = rawBase ? `${rawBase.replace(/\/+$/, '')}/api` : '/api';
+const normalizedBase = rawBase ? rawBase.replace(/\/+$/, '') : '';
+export const API_BASE = normalizedBase
+  ? (normalizedBase.endsWith('/api') ? normalizedBase : `${normalizedBase}/api`)
+  : '/api';
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, options);

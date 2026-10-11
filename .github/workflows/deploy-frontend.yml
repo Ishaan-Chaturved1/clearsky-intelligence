@@ -1,4 +1,4 @@
-name: Deploy Frontend — Build & S3 / CloudFront
+name: Deploy Frontend — ClearSky Intelligence
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ on:
           - staging
           - development
       api_base_url:
-        description: 'Backend API Base URL (leave empty to use existing secret/default)'
+        description: 'Backend API Base URL (leave blank if backend is not yet deployed)'
         required: false
         default: ''
         type: string
@@ -22,6 +22,8 @@ on:
     branches: [ main ]
     paths:
       - 'frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+      - 'scripts/generate_cloudfront_config.py'
 
 concurrency:
   group: deploy-frontend-${{ github.ref }}
@@ -54,15 +56,41 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install Frontend Dependencies
+      - name: Install Dependencies
         run: npm ci
+
+      - name: Check Backend API Configuration
+        id: api-check
+        env:
+          INPUT_URL: ${{ github.event.inputs.api_base_url }}
+          SECRET_URL: ${{ secrets.VITE_API_BASE_URL }}
+        run: |
+          RESOLVED_URL="${INPUT_URL:-$SECRET_URL}"
+          if [ -n "$RESOLVED_URL" ]; then
+            echo "api_url=$RESOLVED_URL" >> $GITHUB_OUTPUT
+            echo "API Base URL configured: $RESOLVED_URL"
+          else
+            echo "api_url=" >> $GITHUB_OUTPUT
+            echo "::notice::VITE_API_BASE_URL is not set. Building frontend with relative '/api' routes. Live backend integration is pending until Elastic Beanstalk backend URL is configured."
+          fi
 
       - name: Run TypeScript Check & Production Build
         env:
-          VITE_API_BASE_URL: ${{ github.event.inputs.api_base_url || secrets.VITE_API_BASE_URL || secrets.DEPLOYMENT_URL || '' }}
+          VITE_API_BASE_URL: ${{ steps.api-check.outputs.api_url }}
         run: |
-          echo "Building frontend with VITE_API_BASE_URL: ${VITE_API_BASE_URL:-[relative /api]}"
           npm run build
+
+      - name: Verify Build Artifacts
+        run: |
+          if [ ! -f dist/index.html ]; then
+            echo "::error::dist/index.html missing after build!"
+            exit 1
+          fi
+          if [ ! -d dist/assets ]; then
+            echo "::error::dist/assets missing after build!"
+            exit 1
+          fi
+          echo "Frontend build successfully verified."
 
       - name: Upload Frontend Artifact
         uses: actions/upload-artifact@v4
@@ -71,15 +99,16 @@ jobs:
           path: frontend/dist/
           retention-days: 7
 
-  deploy-s3:
-    name: Deploy to S3 Static Hosting
+  deploy:
+    name: Deploy to Private S3 & CloudFront (OAC)
     runs-on: ubuntu-latest
     needs: [build]
     environment: production
-    permissions:
-      contents: read
 
     steps:
+      - name: Checkout Repository Scripts
+        uses: actions/checkout@v4
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -87,16 +116,29 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.REGION }}
 
-      - name: Verify AWS Identity & Account ID
+      - name: Verify AWS Identity & Account ID Safety Gate
         env:
           EXPECTED_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
         run: |
-          CALLER_ACCOUNT=$(aws sts get-caller-identity --query "Account" --output text)
-          echo "Authenticated to AWS Account: ${CALLER_ACCOUNT}"
-          if [ -n "$EXPECTED_ACCOUNT_ID" ] && [ "$CALLER_ACCOUNT" != "$EXPECTED_ACCOUNT_ID" ]; then
-            echo "::error::Account mismatch! Current account ${CALLER_ACCOUNT} does not match expected ${EXPECTED_ACCOUNT_ID}."
+          if [ -z "$EXPECTED_ACCOUNT_ID" ]; then
+            echo "::error::Required secret AWS_ACCOUNT_ID is missing or empty!"
             exit 1
           fi
+
+          CALLER_IDENTITY=$(aws sts get-caller-identity --output json)
+          CALLER_ACCOUNT=$(echo "$CALLER_IDENTITY" | jq -r '.Account')
+          CALLER_ARN=$(echo "$CALLER_IDENTITY" | jq -r '.Arn')
+
+          echo "Authenticated IAM Identity: ${CALLER_ARN}"
+          echo "Authenticated AWS Account:  ${CALLER_ACCOUNT}"
+
+          if [ "$CALLER_ACCOUNT" != "$EXPECTED_ACCOUNT_ID" ]; then
+            echo "::error::AWS Account ID mismatch! Caller account ${CALLER_ACCOUNT} does not match expected ${EXPECTED_ACCOUNT_ID}."
+            exit 1
+          fi
+
+          echo "Account verification passed: ${CALLER_ACCOUNT}"
+          echo "ACCOUNT_ID=${CALLER_ACCOUNT}" >> $GITHUB_ENV
 
       - name: Download Frontend Build
         uses: actions/download-artifact@v4
@@ -104,46 +146,205 @@ jobs:
           name: frontend-dist-${{ github.sha }}
           path: frontend-dist/
 
-      - name: Sync Static Assets to Dedicated S3 Bucket
-        env:
-          ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-          CUSTOM_BUCKET: ${{ secrets.S3_FRONTEND_BUCKET }}
+      - name: Verify & Provision Dedicated Private S3 Bucket
+        id: s3-setup
         run: |
-          BUCKET="${CUSTOM_BUCKET:-clearsky-frontend-${TARGET_ENV}-${ACCOUNT_ID}}"
-          echo "Deploying frontend to S3 bucket: ${BUCKET}"
+          BUCKET="clearsky-intelligence-frontend-${TARGET_ENV}-${ACCOUNT_ID}"
+          echo "bucket_name=${BUCKET}" >> $GITHUB_OUTPUT
+          echo "Target frontend S3 bucket: ${BUCKET}"
 
-          # Ensure bucket exists and has versioning enabled
-          if ! aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null; then
-            echo "Bucket ${BUCKET} not found. Creating..."
-            aws s3 mb "s3://${BUCKET}" --region "${REGION}"
-            aws s3api put-bucket-versioning --bucket "${BUCKET}" --versioning-configuration Status=Enabled
+          if aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null; then
+            echo "S3 bucket ${BUCKET} exists. Verifying ownership and tags..."
+            TAGS_JSON=$(aws s3api get-bucket-tagging --bucket "${BUCKET}" --output json 2>/dev/null || echo "{}")
+            APP_TAG=$(echo "$TAGS_JSON" | jq -r '.TagSet[]? | select(.Key=="Application") | .Value')
+            if [ -n "$APP_TAG" ] && [ "$APP_TAG" != "clearsky-intelligence" ]; then
+              echo "::error::Naming conflict: Bucket ${BUCKET} exists with foreign Application tag '${APP_TAG}'. Halting to avoid altering unrelated infrastructure."
+              exit 1
+            fi
+            echo "Ownership verified for existing bucket: ${BUCKET}"
+          else
+            echo "Creating private S3 bucket ${BUCKET} in ${REGION}..."
+            if [ "${REGION}" = "us-east-1" ]; then
+              aws s3api create-bucket --bucket "${BUCKET}" --region "${REGION}"
+            else
+              aws s3api create-bucket --bucket "${BUCKET}" --region "${REGION}" \
+                --create-bucket-configuration LocationConstraint="${REGION}"
+            fi
+
+            echo "Enforcing strict Public Access Block on ${BUCKET}..."
+            aws s3api put-public-access-block --bucket "${BUCKET}" \
+              --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+
+            echo "Enabling bucket versioning..."
+            aws s3api put-bucket-versioning --bucket "${BUCKET}" \
+              --versioning-configuration Status=Enabled
+
+            echo "Enabling AES256 server-side encryption..."
             aws s3api put-bucket-encryption --bucket "${BUCKET}" \
               --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
-            aws s3 website "s3://${BUCKET}" --index-document index.html --error-document index.html
+
+            echo "Tagging bucket for ClearSky frontend ownership..."
+            aws s3api put-bucket-tagging --bucket "${BUCKET}" \
+              --tagging 'TagSet=[{Key=Application,Value=clearsky-intelligence},{Key=Component,Value=frontend},{Key=Environment,Value='"${TARGET_ENV}"'}]'
           fi
 
-          echo "Syncing hashed static assets with immutable cache header..."
+      - name: Provision CloudFront Origin Access Control (OAC)
+        id: oac-setup
+        run: |
+          OAC_NAME="clearsky-intelligence-frontend-oac-${TARGET_ENV}"
+          echo "Checking for existing OAC: ${OAC_NAME}..."
+
+          OAC_ID=$(aws cloudfront list-origin-access-controls \
+            --query "OriginAccessControlList.Items[?Name=='${OAC_NAME}'].Id | [0]" \
+            --output text)
+
+          if [ -z "$OAC_ID" ] || [ "$OAC_ID" = "None" ]; then
+            echo "Creating new CloudFront Origin Access Control: ${OAC_NAME}..."
+            OAC_ID=$(aws cloudfront create-origin-access-control \
+              --origin-access-control-config '{
+                "Name": "'"${OAC_NAME}"'",
+                "Description": "OAC for ClearSky Intelligence Frontend ('"${TARGET_ENV}"')",
+                "SigningProtocol": "sigv4",
+                "SigningBehavior": "always",
+                "OriginAccessControlOriginType": "s3"
+              }' \
+              --query "OriginAccessControl.Id" \
+              --output text)
+            echo "Created OAC with ID: ${OAC_ID}"
+          else
+            echo "Reusing existing OAC with ID: ${OAC_ID}"
+          fi
+
+          echo "oac_id=${OAC_ID}" >> $GITHUB_OUTPUT
+
+      - name: Provision CloudFront Distribution with SPA Fallback
+        id: cf-setup
+        env:
+          BUCKET: ${{ steps.s3-setup.outputs.bucket_name }}
+          OAC_ID: ${{ steps.oac-setup.outputs.oac_id }}
+        run: |
+          DIST_COMMENT="clearsky-intelligence-frontend-${TARGET_ENV}"
+          S3_DOMAIN="${BUCKET}.s3.${REGION}.amazonaws.com"
+
+          echo "Searching for existing distribution with comment '${DIST_COMMENT}'..."
+          DIST_ID=$(aws cloudfront list-distributions \
+            --query "DistributionList.Items[?Comment=='${DIST_COMMENT}'].Id | [0]" \
+            --output text)
+
+          if [ -z "$DIST_ID" ] || [ "$DIST_ID" = "None" ]; then
+            # Secondary check by origin domain name to avoid duplicate distributions
+            DIST_ID=$(aws cloudfront list-distributions \
+              --query "DistributionList.Items[?Origins.Items[?DomainName=='${S3_DOMAIN}']].Id | [0]" \
+              --output text)
+          fi
+
+          if [ -n "$DIST_ID" ] && [ "$DIST_ID" != "None" ]; then
+            echo "Existing CloudFront distribution found: ${DIST_ID}"
+            DIST_DOMAIN=$(aws cloudfront get-distribution --id "${DIST_ID}" --query "Distribution.DomainName" --output text)
+          else
+            echo "Creating new CloudFront distribution with HTTPS delivery & SPA error responses..."
+            CALLER_REF="clearsky-frontend-${TARGET_ENV}-${ACCOUNT_ID}-$(date +%s)"
+
+            python3 scripts/generate_cloudfront_config.py distribution \
+              --caller-ref "${CALLER_REF}" \
+              --bucket "${BUCKET}" \
+              --region "${REGION}" \
+              --oac-id "${OAC_ID}" \
+              --comment "${DIST_COMMENT}" \
+              --output /tmp/cf-config.json
+
+            CREATE_OUTPUT=$(aws cloudfront create-distribution \
+              --distribution-config file:///tmp/cf-config.json \
+              --output json)
+
+            DIST_ID=$(echo "$CREATE_OUTPUT" | jq -r '.Distribution.Id')
+            DIST_DOMAIN=$(echo "$CREATE_OUTPUT" | jq -r '.Distribution.DomainName')
+            echo "Successfully created CloudFront distribution ${DIST_ID} (${DIST_DOMAIN})"
+
+            echo "Waiting for distribution to deploy initial state..."
+            aws cloudfront wait distribution-deployed --id "${DIST_ID}" || echo "Proceeding with asset sync..."
+          fi
+
+          echo "dist_id=${DIST_ID}" >> $GITHUB_OUTPUT
+          echo "dist_domain=${DIST_DOMAIN}" >> $GITHUB_OUTPUT
+
+      - name: Configure Private S3 Bucket Policy for CloudFront OAC
+        env:
+          BUCKET: ${{ steps.s3-setup.outputs.bucket_name }}
+          DIST_ID: ${{ steps.cf-setup.outputs.dist_id }}
+        run: |
+          echo "Attaching S3 bucket policy allowing CloudFront distribution ${DIST_ID} read access..."
+
+          python3 scripts/generate_cloudfront_config.py policy \
+            --bucket "${BUCKET}" \
+            --account-id "${ACCOUNT_ID}" \
+            --dist-id "${DIST_ID}" \
+            --output /tmp/bucket-policy.json
+
+          aws s3api put-bucket-policy --bucket "${BUCKET}" --policy file:///tmp/bucket-policy.json
+          echo "S3 Bucket policy applied successfully."
+
+      - name: Sync Static Assets to S3 with Optimal Caching
+        env:
+          BUCKET: ${{ steps.s3-setup.outputs.bucket_name }}
+        run: |
+          echo "1. Syncing content-hashed assets with 1-year immutable caching..."
+          if [ -d "frontend-dist/assets" ]; then
+            aws s3 sync frontend-dist/assets/ "s3://${BUCKET}/assets/" \
+              --cache-control "max-age=31536000,immutable" \
+              --region "${REGION}"
+          fi
+
+          echo "2. Syncing remaining static files (excluding index.html)..."
           aws s3 sync frontend-dist/ "s3://${BUCKET}/" \
-            --delete \
-            --cache-control "max-age=31536000,immutable" \
+            --exclude "assets/*" \
             --exclude "index.html" \
+            --cache-control "max-age=86400" \
             --region "${REGION}"
 
-          echo "Uploading index.html with no-cache header for SPA routing..."
+          echo "3. Uploading index.html with no-cache header for seamless SPA updates..."
           aws s3 cp frontend-dist/index.html "s3://${BUCKET}/index.html" \
             --cache-control "no-cache,no-store,must-revalidate" \
             --content-type "text/html" \
             --region "${REGION}"
 
-          echo "Frontend successfully synced to s3://${BUCKET}/"
+          echo "Asset synchronization to s3://${BUCKET}/ complete."
 
-      - name: Invalidate CloudFront Cache (if configured)
+      - name: Invalidate CloudFront Cache
         env:
-          CF_DIST_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
-        if: ${{ env.CF_DIST_ID != '' }}
+          DIST_ID: ${{ steps.cf-setup.outputs.dist_id }}
         run: |
-          echo "Invalidating CloudFront distribution ${CF_DIST_ID}..."
-          aws cloudfront create-invalidation \
-            --distribution-id "${CF_DIST_ID}" \
-            --paths "/*"
-          echo "CloudFront invalidation submitted."
+          echo "Submitting CloudFront cache invalidation for distribution ${DIST_ID}..."
+          INVALIDATION_ID=$(aws cloudfront create-invalidation \
+            --distribution-id "${DIST_ID}" \
+            --paths "/index.html" "/*" \
+            --query "Invalidation.Id" \
+            --output text)
+          echo "Invalidation submitted with ID: ${INVALIDATION_ID}"
+
+      - name: Print Deployment Summary
+        env:
+          BUCKET: ${{ steps.s3-setup.outputs.bucket_name }}
+          DIST_ID: ${{ steps.cf-setup.outputs.dist_id }}
+          DIST_DOMAIN: ${{ steps.cf-setup.outputs.dist_domain }}
+          API_URL: ${{ steps.api-check.outputs.api_url }}
+        run: |
+          echo "=========================================================="
+          echo "         CLEARSKY INTELLIGENCE — FRONTEND DEPLOYED        "
+          echo "=========================================================="
+          echo "AWS Account:          ${ACCOUNT_ID}"
+          echo "AWS Region:           ${REGION}"
+          echo "Target Environment:   ${TARGET_ENV}"
+          echo "S3 Bucket:            s3://${BUCKET}"
+          echo "CloudFront Dist ID:   ${DIST_ID}"
+          echo "CloudFront URL:       https://${DIST_DOMAIN}"
+          echo "----------------------------------------------------------"
+          if [ -n "$API_URL" ]; then
+            echo "API Base URL:         ${API_URL}"
+            echo "API Status:           Configured to live backend"
+          else
+            echo "API Base URL:         Relative (/api)"
+            echo "API Status:           PENDING LIVE BACKEND DEPLOYMENT"
+            echo "                      Configure VITE_API_BASE_URL once Elastic Beanstalk is live."
+          fi
+          echo "=========================================================="

@@ -236,3 +236,84 @@ def test_sam_template_persistent_resources_retain_policy():
         assert res is not None, f"Resource {key} must exist in template.yaml"
         assert res.get("DeletionPolicy") == "Retain", f"{key} must have DeletionPolicy: Retain"
         assert res.get("UpdateReplacePolicy") == "Retain", f"{key} must have UpdateReplacePolicy: Retain"
+
+
+def test_deploy_frontend_workflow_s3_and_cloudfront_oac_configuration():
+    """
+    Verifies that deploy-frontend.yml and generate_cloudfront_config.py configure:
+    - Dedicated private S3 bucket with account ID
+    - CloudFront Origin Access Control (OAC)
+    - Custom error responses for SPA fallback (403/404 -> index.html 200)
+    - Optimized caching for immutable assets vs index.html
+    - Account ID safety verification
+    """
+    frontend_wf = REPO_ROOT / ".github" / "workflows" / "deploy-frontend.yml"
+    assert frontend_wf.exists()
+    content = frontend_wf.read_text(encoding="utf-8")
+
+    # Private S3 and OAC
+    assert "clearsky-intelligence-frontend-${TARGET_ENV}-${ACCOUNT_ID}" in content
+    assert "put-public-access-block" in content
+    assert "create-origin-access-control" in content
+    assert "scripts/generate_cloudfront_config.py" in content
+
+    # Caching Strategy
+    assert "max-age=31536000,immutable" in content
+    assert "no-cache,no-store,must-revalidate" in content
+
+    # Account Verification
+    assert "aws sts get-caller-identity" in content
+    assert "EXPECTED_ACCOUNT_ID" in content
+
+    # No backend restart or ingestion
+    assert "eb deploy" not in content
+    assert "eb setenv" not in content
+    assert "sam deploy" not in content
+    assert "scripts/ingest" not in content
+
+    # Verify script generates exact SPA fallback configuration
+    from scripts.generate_cloudfront_config import generate_distribution_config, generate_oac_bucket_policy
+    cfg = generate_distribution_config(
+        caller_ref="test-ref",
+        bucket="test-bucket",
+        region="us-east-1",
+        oac_id="oac-test-id",
+        comment="test-comment"
+    )
+    assert cfg["DefaultRootObject"] == "index.html"
+    error_responses = cfg["CustomErrorResponses"]["Items"]
+    error_codes = {item["ErrorCode"]: item for item in error_responses}
+    assert 403 in error_codes and error_codes[403]["ResponsePagePath"] == "/index.html" and error_codes[403]["ResponseCode"] == "200"
+    assert 404 in error_codes and error_codes[404]["ResponsePagePath"] == "/index.html" and error_codes[404]["ResponseCode"] == "200"
+
+    # Verify OAC policy
+    policy = generate_oac_bucket_policy(bucket="test-bucket", account_id="654157459447", dist_id="EDIST123")
+    statement = policy["Statement"][0]
+    assert statement["Principal"]["Service"] == "cloudfront.amazonaws.com"
+    assert "test-bucket/*" in statement["Resource"]
+    assert "EDIST123" in statement["Condition"]["StringEquals"]["AWS:SourceArn"]
+
+
+def test_frontend_api_base_url_normalization_logic():
+    """
+    Verifies URL normalization logic mirroring frontend/src/services/api.ts.
+    """
+    def compute_api_base(raw: str | None) -> str:
+        trimmed = (raw or "").strip()
+        normalized = trimmed.rstrip("/") if trimmed else ""
+        if not normalized:
+            return "/api"
+        return normalized if normalized.endswith("/api") else f"{normalized}/api"
+
+    # Default / empty
+    assert compute_api_base(None) == "/api"
+    assert compute_api_base("") == "/api"
+    assert compute_api_base("   ") == "/api"
+
+    # Relative or absolute without trailing slash
+    assert compute_api_base("http://backend.elasticbeanstalk.com") == "http://backend.elasticbeanstalk.com/api"
+    # With trailing slash
+    assert compute_api_base("http://backend.elasticbeanstalk.com/") == "http://backend.elasticbeanstalk.com/api"
+    # Already includes /api
+    assert compute_api_base("http://backend.elasticbeanstalk.com/api") == "http://backend.elasticbeanstalk.com/api"
+    assert compute_api_base("http://backend.elasticbeanstalk.com/api/") == "http://backend.elasticbeanstalk.com/api"
