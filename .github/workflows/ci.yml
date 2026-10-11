@@ -46,7 +46,7 @@ jobs:
 
       - name: Test AWS SAM Build
         run: |
-          sam build --template-file infrastructure/template.yaml --debug
+          sam build --template-file infrastructure/template.yaml --use-container --debug
 
       - name: Run Backend Pytest Suite
         env:
