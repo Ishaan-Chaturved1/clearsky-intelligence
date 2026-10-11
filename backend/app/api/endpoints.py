@@ -73,49 +73,8 @@ forecast_service = ForecastService()
 predictive_service = PredictiveModelService()
 geocoding_service = GeocodingService()
 
-def calculate_indian_aqi(pm10: Optional[float], pm25: Optional[float]) -> Optional[int]:
-    """
-    Computes Indian National Air Quality Index (CPCB breakpoint formula)
-    for PM10 (24h) and PM2.5 (24h). Returns None if neither measurement is available.
-    """
-    if (pm10 is None or pm10 < 0) and (pm25 is None or pm25 < 0):
-        return None
-
-    def calc_sub_index(conc: Optional[float], breakpoints: list) -> Optional[int]:
-        if conc is None or conc < 0:
-            return None
-        for (c_low, c_high, i_low, i_high) in breakpoints:
-            if c_low <= conc <= c_high:
-                return int(round(((i_high - i_low) / (c_high - c_low)) * (conc - c_low) + i_low))
-        if conc > breakpoints[-1][1]:
-            # Extrapolate beyond severe threshold
-            c_low, c_high, i_low, i_high = breakpoints[-1]
-            return min(500, int(round(i_high + (conc - c_high) * 0.5)))
-        return None
-
-    pm10_bp = [
-        (0, 50, 0, 50),
-        (51, 100, 51, 100),
-        (101, 250, 101, 200),
-        (251, 350, 201, 300),
-        (351, 430, 301, 400),
-        (431, 500, 401, 500),
-    ]
-    pm25_bp = [
-        (0, 30, 0, 50),
-        (31, 60, 51, 100),
-        (61, 90, 101, 200),
-        (91, 120, 201, 300),
-        (121, 250, 301, 400),
-        (251, 380, 401, 500),
-    ]
-
-    sub_pm10 = calc_sub_index(pm10, pm10_bp)
-    sub_pm25 = calc_sub_index(pm25, pm25_bp)
-    sub_indices = [s for s in (sub_pm10, sub_pm25) if s is not None]
-    if not sub_indices:
-        return None
-    return max(sub_indices)
+# Delegated to isolated CPCB AQI service in app.investigation.aqi_service
+from app.investigation.aqi_service import calculate_indian_aqi
 
 @router.get("/health")
 def get_health():

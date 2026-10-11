@@ -480,3 +480,189 @@ export interface LocationAnalysisResponse {
   fire_summary?: FireSummary;
 }
 
+export type EvidenceDirection = 'SUPPORTS' | 'CONTRADICTS' | 'CONTEXT_ONLY' | 'INSUFFICIENT_INFORMATION';
+
+export interface CandidateSource {
+  source_id: string;
+  category: string;
+  name: string;
+  description?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  geographic_region?: string | null;
+  distance_km?: number | null;
+  bearing_deg?: number | null;
+  compass_direction?: string | null;
+  provider: string;
+  verification_status: string;
+  data_quality_info?: string | null;
+}
+
+export interface LocalSourceInvestigationResult {
+  status: string;
+  center_latitude: number;
+  center_longitude: number;
+  search_radius_km: number;
+  total_candidates_found: number;
+  candidates: CandidateSource[];
+  data_source_mode: string;
+  provider_name: string;
+  query_timestamp: string;
+  error_message?: string | null;
+  limitations: string[];
+}
+
+export interface TrajectoryPoint {
+  step_hours_back: number;
+  timestamp: string;
+  latitude: number;
+  longitude: number;
+  wind_speed_kmh: number;
+  wind_direction_deg: number;
+  boundary_layer_height_m?: number | null;
+  temperature_c?: number | null;
+  precipitation_mm?: number | null;
+  is_forecast: boolean;
+}
+
+export interface TransportAssessment {
+  status: string;
+  method_name: string;
+  start_latitude: number;
+  start_longitude: number;
+  event_timestamp: string;
+  lookback_hours: number;
+  trajectory_points: TrajectoryPoint[];
+  total_path_length_km?: number | null;
+  net_displacement_km?: number | null;
+  dominant_upwind_bearing_deg?: number | null;
+  dominant_upwind_compass?: string | null;
+  average_transport_speed_kmh?: number | null;
+  min_boundary_layer_height_m?: number | null;
+  data_completeness_pct: number;
+  is_forecast_derived: boolean;
+  data_source_mode: string;
+  uncertainty_description: string;
+  limitations: string[];
+  error_message?: string | null;
+}
+
+export interface FireDetectionRecord {
+  fire_id: string;
+  latitude: number;
+  longitude: number;
+  detection_time_utc?: string | null;
+  distance_from_event_km: number;
+  bearing_from_event_deg: number;
+  bearing_compass: string;
+  brightness: any;
+  confidence?: string | null;
+  satellite_instrument: string;
+  is_upwind: boolean;
+  distance_to_trajectory_km?: number | null;
+  plausible_smoke_corridor: boolean;
+}
+
+export interface SatelliteFireCorrelationResult {
+  status: string;
+  event_latitude: number;
+  event_longitude: number;
+  search_radius_km: number;
+  total_fires_in_region: number;
+  upwind_fires_count: number;
+  trajectory_correlated_fires_count: number;
+  closest_fire_distance_km?: number | null;
+  closest_fire_bearing_compass?: string | null;
+  fire_records: FireDetectionRecord[];
+  candidate_sources: CandidateSource[];
+  data_source_mode: string;
+  provider_name: string;
+  query_timestamp: string;
+  error_message?: string | null;
+  limitations: string[];
+}
+
+export interface EvidenceItem {
+  evidence_id: string;
+  evidence_type: string;
+  provider: string;
+  timestamp_start: string;
+  timestamp_end?: string | null;
+  geographic_coverage?: string | null;
+  source_reference: string;
+  description: string;
+  hypothesis_id?: string | null;
+  direction: EvidenceDirection;
+  data_quality_indicators?: Record<string, any>;
+  known_limitations?: string[];
+  provenance: string;
+}
+
+export interface InvestigationReport {
+  report_id: string;
+  investigation_id: string;
+  summary_of_observed_event: string;
+  main_measured_facts: string[];
+  potential_contributing_sources: CandidateSource[];
+  evidence_supporting: EvidenceItem[];
+  evidence_contradicting: EvidenceItem[];
+  origin_and_transport_findings?: string | null;
+  source_contributions: any[];
+  confidence_assessment: string;
+  alternative_explanations: string[];
+  data_gaps: string[];
+  recommended_next_steps: string[];
+  data_source_references: string[];
+  generated_at: string;
+  evidence_supporting_count?: number;
+  evidence_contradicting_count?: number;
+}
+
+export interface InvestigationEntity {
+  investigation_id: string;
+  geographic_scope: string;
+  time_window_start: string;
+  time_window_end?: string | null;
+  associated_event_id?: string | null;
+  pollutants_under_investigation: string[];
+  candidate_source_hypotheses: CandidateSource[];
+  supporting_evidence: EvidenceItem[];
+  contradicting_evidence: EvidenceItem[];
+  context_evidence: EvidenceItem[];
+  evidence_ledger?: EvidenceItem[];
+  analysis_methods: string[];
+  data_quality_limitations: string[];
+  alternative_explanations: string[];
+  missing_evidence: string[];
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InvestigationDossier {
+  investigation_id: string;
+  target_latitude: number;
+  target_longitude: number;
+  target_scope: string;
+  event?: any | null;
+  investigation: InvestigationEntity;
+  report: InvestigationReport;
+  local_sources: LocalSourceInvestigationResult;
+  transport: TransportAssessment;
+  satellite: SatelliteFireCorrelationResult;
+  generated_at: string;
+  data_completeness_rating: string;
+}
+
+export interface InvestigationAnalyzeParams {
+  latitude?: number;
+  longitude?: number;
+  zone_id?: string;
+  pollutant?: string;
+  lookback_hours?: number;
+  radius_km?: number;
+  pm10?: number;
+  pm25?: number;
+  reference_time?: string;
+}
+

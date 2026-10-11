@@ -17,6 +17,10 @@ class FirmsClient:
         self.base_url = settings.NASA_FIRMS_BASE_URL
         self.timeout = settings.API_TIMEOUT_SECONDS
 
+    def is_available(self) -> bool:
+        """Returns True if the NASA FIRMS map key is configured."""
+        return bool(self.map_key)
+
     def _haversine_distance_km(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         r = 6371.0
         phi1 = math.radians(lat1)
